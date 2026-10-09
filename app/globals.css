@@ -220,6 +220,48 @@ a {
   animation: peSpin 0.9s linear infinite;
 }
 
+/* "Which list" reveal on a denial (Wizard ListedOn). */
+@keyframes peChip {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.pe-chip {
+  display: inline-flex;
+  animation: peChip 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes peFade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.pe-fade {
+  animation: peFade 0.25s ease both;
+}
+
+@keyframes peShimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+.pe-skeleton {
+  background: linear-gradient(90deg, rgba(27, 27, 27, 0.08) 25%, rgba(27, 27, 27, 0.16) 50%, rgba(27, 27, 27, 0.08) 75%);
+  background-size: 200% 100%;
+  animation: peShimmer 1.4s linear infinite;
+}
+
 @keyframes peRise {
   from {
     opacity: 0;
@@ -502,6 +544,9 @@ a {
   .pe-reveal,
   .pe-rise > *,
   .pe-seq > *,
+  .pe-chip,
+  .pe-fade,
+  .pe-skeleton,
   .pe-sweep::after,
   .pe-spin,
   .pe-pulse {

@@ -140,6 +140,36 @@ type Party = { address: string; screened: boolean; sanctioned: boolean | null; d
  */
 type Verdict = "pass" | "block" | "unavailable" | "none";
 
+/** /api/screen's answer. */
+type ScreenResult = { ok: boolean; parties?: Party[]; stale?: boolean; ageHours?: number | null };
+
+/**
+ * Fold the /api/screen answer into an outcome.
+ *
+ * A stale refusal on a denial means the policy failed closed rather than
+ * finding anyone: the screening source refused this lookup for the same
+ * reason the policy refused, so reporting "Non Compliant" would tell someone
+ * their counterparty is sanctioned when nobody has been accused of anything.
+ */
+function withAttribution(o: Outcome, sj: ScreenResult | null, allow: boolean): Outcome {
+  if (sj?.ok && sj.parties) {
+    return { ...o, attribution: "done", parties: { to: sj.parties[0], from: sj.parties[1] } };
+  }
+  if (sj?.stale && !allow) {
+    return {
+      ...o,
+      attribution: "failed",
+      verdict: "unavailable",
+      headline: "Screening unavailable",
+      reason:
+        sj.ageHours != null
+          ? `The sanctions list is ${Math.round(sj.ageHours)} hours old, so the policy refused to screen against it. The transfer is blocked. Nobody has been found on a list.`
+          : "The policy could not screen against a current sanctions list, so it refused. The transfer is blocked. Nobody has been found on a list.",
+    };
+  }
+  return { ...o, attribution: "failed" };
+}
+
 type Outcome = {
   verdict: Verdict;
   headline: string;
@@ -150,6 +180,13 @@ type Outcome = {
   raw: unknown;
   /** Filled in after the verdict, from the same feed the oracle queried. */
   parties?: { to?: Party; from?: Party };
+  /**
+   * Where the "which list" lookup stands. Started in parallel with the task,
+   * so it is usually "done" by the time the verdict renders; the row is
+   * reserved either way so a late answer fills in place instead of pushing
+   * the panel around.
+   */
+  attribution?: "pending" | "done" | "failed";
   /**
    * When the decision was read.
    *
@@ -350,6 +387,17 @@ export default function Wizard() {
     setThrottled(null);
     setRun({ status: "running" });
 
+    // Started now, alongside the task, so the "which list" answer is usually
+    // ready before the verdict is. Never rejects: failure resolves to null.
+    const screenP: Promise<ScreenResult | null> = fetch("/api/screen", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ addresses: [sendTo, sendFrom] }),
+      signal: ac.signal,
+    })
+      .then((r) => r.json())
+      .catch(() => null);
+
     try {
       const res = await fetch("/api/evaluate", {
         method: "POST",
@@ -405,74 +453,41 @@ export default function Wizard() {
         return;
       }
 
-      setRun({
-        status: "done",
-        outcome: {
-          verdict: allow ? "pass" : "block",
-          headline: allow ? "Compliant" : "Non Compliant",
-          reason: allow
-            ? "The recipient is not designated. The transfer may proceed."
-            : "The transfer is blocked.",
-          denies: extractDenies(json.result),
-          datasets: extractDatasets(json.result),
-          explorerUrl: json.explorerUrl ?? null,
-          raw: json.result,
-          decidedAt: new Date().toISOString(),
-        },
-      });
+      const base: Outcome = {
+        verdict: allow ? "pass" : "block",
+        headline: allow ? "Compliant" : "Non Compliant",
+        reason: allow
+          ? "The recipient is not designated. The transfer may proceed."
+          : "The transfer is blocked.",
+        denies: extractDenies(json.result),
+        datasets: extractDatasets(json.result),
+        explorerUrl: json.explorerUrl ?? null,
+        raw: json.result,
+        decidedAt: new Date().toISOString(),
+        attribution: "pending",
+      };
 
       /**
-       * Attribution, after the fact.
+       * Attribution: which party, which list.
        *
-       * The attestation is one bit — it does not say which party tripped or
-       * which list named them, and "a party to this transfer is designated"
-       * is a useless sentence to read on a compliance screen. So we ask the
-       * same feed the oracle asked, per address, and label it as the
-       * explanation it is rather than as the signed claim.
+       * The attestation is one bit, so we ask the same source the oracle asked
+       * (RedStone, plus OpenSanctions for list names) and label it as the
+       * explanation it is. The lookup was started alongside the task; give it
+       * a short grace period so the verdict usually renders complete, with
+       * nothing arriving afterwards to shift the panel.
        */
-      try {
-        const s = await fetch("/api/screen", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ addresses: [sendTo, sendFrom] }),
-        });
-        const sj = await s.json();
+      const early = await Promise.race([
+        screenP,
+        new Promise<"late">((r) => setTimeout(() => r("late"), 1500)),
+      ]);
 
-        if (sj.ok) {
-          setRun((r) =>
-            r.status === "done"
-              ? { ...r, outcome: { ...r.outcome, parties: { to: sj.parties[0], from: sj.parties[1] } } }
-              : r,
-          );
-        } else if (sj.stale && !allow) {
-          /**
-           * The denial was the policy failing closed, not a designation.
-           *
-           * The screening service refused this lookup for the same reason it
-           * refused the operators' — the list is too old to consult — so
-           * `screening_unavailable` fired. Reporting that as "Non Compliant"
-           * would tell someone their counterparty is sanctioned when nobody
-           * has been accused of anything.
-           */
-          setRun((r) =>
-            r.status === "done"
-              ? {
-                  ...r,
-                  outcome: {
-                    ...r.outcome,
-                    verdict: "unavailable",
-                    headline: "Screening unavailable",
-                    reason:
-                      sj.ageHours != null
-                        ? `The sanctions list is ${Math.round(sj.ageHours)} hours old, so the policy refused to screen against it. The transfer is blocked. Nobody has been found on a list.`
-                        : "The policy could not screen against a current sanctions list, so it refused. The transfer is blocked. Nobody has been found on a list.",
-                  },
-                }
-              : r,
-          );
-        }
-      } catch {
-        // The verdict stands on its own; attribution is a nicety.
+      if (early === "late") {
+        setRun({ status: "done", outcome: base });
+        screenP.then((sj) =>
+          setRun((r) => (r.status === "done" ? { ...r, outcome: withAttribution(r.outcome, sj, allow) } : r)),
+        );
+      } else {
+        setRun({ status: "done", outcome: withAttribution(base, early, allow) });
       }
     } catch (e) {
       // A cancelled run is not a failed one, and must not render as a verdict.
@@ -1374,6 +1389,69 @@ function Cta({
   );
 }
 
+/* ── Listed on ──────────────────────────────────────────── */
+
+/**
+ * The "which list" row on a denial. Fixed height in every state, so nothing
+ * below it moves when the answer lands:
+ *
+ *   pending  "Checking which list…" and two shimmering placeholder pills
+ *   done     "Listed on" and the list names, each rising in after the last
+ *   failed   "List names unavailable" (the verdict stands; this is only the
+ *            explanation)
+ */
+function ListedOn({
+  state,
+  names,
+  viaOpenSanctions,
+}: {
+  state: "pending" | "done" | "failed";
+  names: string[];
+  viaOpenSanctions: boolean;
+}) {
+  const ready = state === "done" && names.length > 0;
+  // If the names are there on first render, the row itself is still rising
+  // in (pe-seq, ~0.4s), so the chips wait for it. If they arrive later, they
+  // can start almost at once.
+  const [initial] = useState(state);
+  const base = initial === "done" ? 0.8 : 0.08;
+  return (
+    <div
+      aria-live="polite"
+      style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: SP.x1, marginTop: SP.x3, minHeight: 32 }}
+    >
+      <span key={ready ? "l" : state} className="pe-fade" style={{ ...small(), color: "rgba(27,27,27,0.6)" }}>
+        {ready ? "Listed on" : state === "pending" ? "Checking which list…" : "List names unavailable"}
+      </span>
+
+      {state === "pending" &&
+        [72, 104].map((w) => (
+          <span
+            key={w}
+            className="pe-skeleton"
+            style={{ width: w, height: 28, borderRadius: R_PILL, display: "inline-block" }}
+          />
+        ))}
+
+      {ready &&
+        names.map((n, i) => (
+          <span key={n} className="pe-chip" style={{ animationDelay: `${base + i * 0.12}s` }}>
+            <Tag tone="strong">{n}</Tag>
+          </span>
+        ))}
+
+      {ready && viaOpenSanctions && (
+        <span
+          className="pe-chip"
+          style={{ ...small(), color: "rgba(27,27,27,0.5)", animationDelay: `${base + names.length * 0.12}s` }}
+        >
+          · list names via OpenSanctions
+        </span>
+      )}
+    </div>
+  );
+}
+
 /* ── Decision ───────────────────────────────────────────── */
 
 function Decision({
@@ -1411,13 +1489,6 @@ function Decision({
   // RedStone flagged it but the list-name lookup came back empty: still say
   // where the match came from rather than showing nothing.
   const regimes = named.length ? named : p?.to?.sanctioned ? ["RedStone sanctions list"] : [];
-
-  /**
-   * Only claimed once attribution has come back. Before that the verdict is
-   * the verdict — a sentence naming a party we have not identified would be a
-   * guess dressed as a finding.
-   */
-  const who = outcome.verdict !== "block" || flagged.length === 0 ? null : "The recipient is designated.";
 
   return (
     <>
@@ -1490,9 +1561,19 @@ function Decision({
 
         {/* Reason, lists, parties — arriving in the order you would say them. */}
         <div className="pe-seq" style={{ display: "contents" }}>
+        {/* Static text: it never changes after render, so it can't reflow. */}
         <div style={{ ...T.valueLg, fontFamily: SANS, color: INK, marginTop: SP.x2, maxWidth: "46ch" }}>
-          {who ? `${who} ${outcome.reason}` : outcome.reason}
+          {outcome.reason}
         </div>
+
+        {/*
+          Which list. Reserved on every denial so a late answer fills in
+          place: "Checking which list…" with placeholder pills, then the list
+          names rise in one by one. Only lists that actually matched.
+        */}
+        {outcome.verdict === "block" && (
+          <ListedOn state={outcome.attribution ?? "pending"} names={regimes} viaOpenSanctions={named.length > 0} />
+        )}
 
       {/*
         The two sources disagreeing is itself the finding.
@@ -1534,17 +1615,6 @@ function Decision({
         contradicting the headline above them, because the attestation carries
         no dataset information and the code filled the gap with defaults.
       */}
-      {outcome.verdict === "block" && regimes.length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: SP.x1, marginTop: SP.x3, alignItems: "center" }}>
-          <span style={{ ...small(), color: "rgba(27,27,27,0.6)" }}>Listed on</span>
-          {regimes.map((r) => (
-            <Tag key={r} tone="strong">{r}</Tag>
-          ))}
-          {named.length > 0 && (
-            <span style={{ ...small(), color: "rgba(27,27,27,0.5)" }}>· list names via OpenSanctions</span>
-          )}
-        </div>
-      )}
 
       {/*
         The "No match on US · EU · UN · UK" chips were here.

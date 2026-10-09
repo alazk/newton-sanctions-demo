@@ -29,8 +29,16 @@ say so; keep it that way while this policy is bound.
 
 ```
 provider (lib/catalog.ts)  local-denylist
-policy client              0xfd054556b4d00d8b0f897b1ae377ecd17fccae78
-policy                     0x627222E71CCEc59C315c83C095f12458FaB5B221
+LIVE SINCE OCT 9 2026 — RedStone Sanctions Oracle
+policy client              0x57F4fB0a4A4b34eA51D47BC7c99c960b80A58D18   (v0.7, SanctionsDemoClient)
+policy                     0xd0Ff7aca199AeaCC5F316b029A476Da7684a3877   (policy/redstone, WASM on policy)
+oracle source              RedStone 0x574Ad490fE8087B580DB227a8Ca7EfB7C19Dc8C4 (Ethereum mainnet)
+params                     {"max_list_age_seconds": 691200}  (8 days), expireAfter 300
+test client                0x6DeD0ACa06D76FEF4ec8254B8f661edbC387cf2A   (same policy, for trials)
+
+FALLBACK (frozen snapshot, below) — node policy/setpolicies-v07.mjs --confirm
+policy                     0x95c66b29DB62136094DC95e40C33cc524cFe4ba1   (v0.7 factory 0x8dd5984f…)
+policyId (set, rev 1)      0x34addc4872768487ad553a23a8b7e85e792e9563ba57d7addc983e20ee4caded
 policy cid                 bafkreigvmehmguzwvy3wla2q56jk25jpfog3ecuym5v6cquoeocjodhqri
 addresses                  119 (lib/ofac-full.ts ∪ pool ∪ 0xB10C list)
 regenerate                 node scripts/emit-full-list.mjs
@@ -38,7 +46,8 @@ regenerate                 node scripts/emit-full-list.mjs
 
 The on-chain list is a **frozen snapshot** — captured once and left in place, not
 tracked automatically. To cut a newer one by hand: `node scripts/emit-full-list.mjs`
-then `node policy/setparams.mjs --confirm` (one transaction, no IPFS). It **skips
+then `node policy/setpolicies-v07.mjs --confirm` (one transaction, no IPFS; the
+old `setparams.mjs` targets pre-0.7 clients and no longer applies). It **skips
 the write when the on-chain list already matches**, and always re-test a **clean**
 address after — a failed params write makes the policy deny everything, which
 looks identical to it working.

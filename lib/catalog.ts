@@ -61,6 +61,19 @@ export interface Provider {
 }
 
 export const PROVIDERS: Record<string, Provider> = {
+  redstone: {
+    id: "redstone",
+    name: "RedStone Sanctions Oracle",
+    blurb:
+      "Screens payee and payer against RedStone's onchain sanctions list on Ethereum mainnet: 463 official lists aggregated by OpenSanctions (OFAC, EU, UN, UK and others), updated weekly. The policy refuses to screen when the list is more than 8 days old.",
+    // Protocol 0.7: the WASM oracle lives on the policy itself
+    // (policy/redstone, policy 0xd0Ff7aca…), not in a separate PolicyData.
+    policyData: "",
+    dataPath: "data.wasm",
+    requiredSecrets: [],
+    fields: ["ok", "list_age_seconds", "to", "from"],
+    submittable: true,
+  },
   "local-denylist": {
     id: "local-denylist",
     name: "Local OFAC denylist (no oracle)",
@@ -206,7 +219,11 @@ export const GOALS: Record<string, Goal> = {
      * rebind the client to the yente policy, and put the live-feed language
      * back in the card blurb below and in app/layout.tsx.
      */
-    providers: ["local-denylist"],
+    // RedStone since Oct 2026: live, multi-regime, keyless, and deployable on
+    // 0.7 (uploads go through Newton's gateway, which the operators can read).
+    // To fall back to the frozen snapshot: ["local-denylist"], and restore the
+    // denylist policy on the client with policy/setpolicies-v07.mjs.
+    providers: ["redstone"],
     rules: [
       "payee_not_on_denylist",
       "payer_not_on_denylist",

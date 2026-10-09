@@ -26,14 +26,24 @@ const sans = Inter({
  * lists, decided by a quorum before the transfer runs.
  */
 export const metadata: Metadata = {
+  // Absolute URLs for og:image / twitter:image (app/opengraph-image.tsx).
+  metadataBase: new URL("https://sanctions-demo.newt.foundation"),
   title: "Newton Sanctions Demo",
   description:
-    "Sanctions screening enforced before a transaction executes. The recipient is checked against a sanctions list bound to the policy on chain, and the decision is signed by an operator quorum on Ethereum Sepolia.",
+    "Check a wallet before you pay it. The wallet is screened against the RedStone Sanctions Oracle, 463 official lists including OFAC, EU, UN and UK, and the decision is signed by a Newton operator quorum on Ethereum Sepolia.",
   openGraph: {
     title: "Newton Sanctions Demo",
     description:
-      "Sanctions screening enforced before a transaction executes, signed by an operator quorum on Ethereum Sepolia.",
+      "Check a wallet before you pay it. Screened against the RedStone Sanctions Oracle and signed by a Newton operator quorum.",
     type: "website",
+    url: "https://sanctions-demo.newt.foundation",
+    siteName: "Newton",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Newton Sanctions Demo",
+    description:
+      "Check a wallet before you pay it. Screened against the RedStone Sanctions Oracle and signed by a Newton operator quorum.",
   },
 };
 

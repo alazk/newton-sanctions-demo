@@ -1,0 +1,10 @@
+{
+  "entrypoint": "newton_redstone.allow",
+  "policyCid": "bafkreifusthd4yqrmco62rwi5y6ovacbvx5xcvxccyd7tm4codq23o5jg4",
+  "policyCodeHash": "0xa585f4951918a21baec73a1de9862aa6362d48b5bd9c20d172337bf9a385d57d",
+  "policyDataMetadataCid": "",
+  "policyMetadataCid": "bafkreihpo2vmvnzan4ogalasvxvy54oszldef7mvh32esnur7ahfm5inlq",
+  "schemaCid": "bafkreidv2d7jyunn2wuiorkhlmcieyogeqadebdu6ujqpxsk73y47h3r5a",
+  "secretsSchemaCid": "",
+  "wasmCid": "bafkreicdyh43c5vv42iunlojjcsaoqvnbzpswqrgk22c2alqjinf55pkbm"
+}

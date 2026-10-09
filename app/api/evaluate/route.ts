@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CHAIN_ID, DEMO_POLICY_CLIENT, ENTRYPOINT } from "@/lib/catalog";
 import { clientKey, rateLimit } from "@/lib/rate-limit";
+import { wasmArgsFor } from "@/lib/policy-set";
 
 /**
  * Evaluates the generated policy against a live oracle on Ethereum Sepolia.
@@ -242,6 +243,8 @@ async function submitRealTask({
   const CLIENT_BY_PROVIDER: Record<string, string | undefined> = {
     yente: process.env.POLICY_CLIENT_YENTE ?? process.env.POLICY_CLIENT,
     "local-denylist": process.env.POLICY_CLIENT_DENYLIST,
+    // The live client: since Oct 2026 its policy set is the RedStone policy.
+    redstone: process.env.POLICY_CLIENT_REDSTONE ?? process.env.POLICY_CLIENT_DENYLIST,
   };
 
   const policyClient = providerId ? CLIENT_BY_PROVIDER[providerId] : process.env.POLICY_CLIENT;
@@ -262,6 +265,14 @@ async function submitRealTask({
   }
 
   const sender = from || "0x8b4bA8708239757e84aD26a503500Bc5fC1c1a48";
+
+  // One entry per policy in the client's set: oracle args for WASM policies,
+  // "0x" for pure-Rego ones. Read from chain (lib/policy-set.ts); if the read
+  // fails, fall back to a single args entry.
+  const oracleEntry = hexEncodeJson(
+    policyDataAddress ? { to, from: sender, ...oracleArgs() } : { to, from: sender },
+  );
+  const wasmArgs = (await wasmArgsFor(policyClient, oracleEntry)) ?? [oracleEntry];
 
   const rpcBody = {
     jsonrpc: "2.0",
@@ -292,9 +303,13 @@ async function submitRealTask({
        * fail-closed rule denies. A clean wallet then reads NON COMPLIANT for
        * a reason that has nothing to do with sanctions.
        */
-      ...(policyDataAddress
-        ? { wasm_args: hexEncodeJson({ to, from: sender, ...oracleArgs() }) }
-        : {}),
+      /*
+       * Protocol 0.7: clients hold a policy SET, and the gateway requires
+       * wasm_args to be an array with exactly one entry per policy in that
+       * set — "0x" (empty) for a pure-Rego policy like the denylist. Omitting
+       * it fails with "wasm_args count (0) must match the policy set (1)".
+       */
+      wasm_args: wasmArgs,
     },
   };
 

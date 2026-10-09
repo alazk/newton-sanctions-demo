@@ -14,6 +14,9 @@ next-env.d.ts
 # .env.local` as step two of setup, against a file that would not be there.
 !.env.local.example
 
+# Scratch copy of another site's bundle, used once for reference.
+.lazarus-ref/
+
 # macOS writes these into every folder you open in Finder. Three of them got
 # committed in the design-system change because `git add -A` takes everything.
 .DS_Store

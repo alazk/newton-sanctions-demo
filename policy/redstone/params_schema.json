@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "description": "RedStone sanctions screening parameters",
+  "properties": {
+    "max_list_age_seconds": {
+      "type": "number",
+      "description": "Refuse to screen (deny with screening_unavailable) when RedStone's list is older than this. Default 691200 (8 days)."
+    }
+  }
+}

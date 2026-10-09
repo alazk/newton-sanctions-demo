@@ -335,6 +335,56 @@ a {
   }
 }
 
+/* ── Intro ──────────────────────────────────────────────── */
+
+/* Picture left, words right; the same two-column shape as Lazarus Scan.
+   Capped and centred so the two columns stay balanced on wide screens. */
+.pe-intro {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  align-content: center;
+  gap: 64px; /* SP.x8 */
+}
+
+.pe-intro-text {
+  max-width: 520px;
+}
+
+@media (max-width: 900px) {
+  .pe-intro {
+    grid-template-columns: minmax(0, 1fr);
+    align-content: start;
+    gap: 32px;
+  }
+  .pe-intro-text {
+    max-width: none;
+  }
+  /* Keyboard hint is noise on touch screens. */
+  .pe-intro-keys {
+    display: none;
+  }
+}
+
+@media (hover: none) {
+  .pe-intro-keys {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pe-intro-art *,
+  .pe-intro-text * {
+    transition: none !important;
+  }
+}
+
 /*
  * The `.pe-pad` and `.pe-mast` padding overrides lived here and at 640px.
  * They were what made the masthead 16px while the panels beneath it were 48 —
@@ -395,7 +445,7 @@ a {
   /* Stack rather than squeeze: two 48px pills side by side at 390px leaves
      each about 150px, which cuts "Sanctioned address" in half. */
   .pe-radios {
-    flex-direction: column;
+    grid-template-columns: minmax(0, 1fr) !important;
     gap: 12px !important;
   }
 

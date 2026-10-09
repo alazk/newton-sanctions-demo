@@ -1,106 +1,103 @@
 import { NextResponse } from "next/server";
+import { redstoneScreen } from "@/lib/redstone";
 
 /**
  * Which party is designated, and on which lists.
  *
- * The on-chain verdict is a single bit. `newt_createTask` returns
- * `task_response.evaluation_result` as a bytes32 — allowed or not — and
- * nothing else. It does not say which side tripped, or which regime listed
- * them. That is correct for an attestation (the signed claim is "this intent
- * is authorised") but it leaves the page unable to answer the first question
- * anyone asks: *which one?*
+ * The on-chain verdict is a single bit: it does not say which side tripped.
+ * So this asks the same source the operators' oracle asked, the RedStone
+ * Sanctions Oracle on Ethereum mainnet, per address.
  *
- * So this asks the same screening data the operators' oracle asked, using the
- * same query the WASM component builds — sanctions-oracle/yente.js, a
- * CryptoWallet match on publicKey. One call per address, so the answer is
- * attributable per party.
+ * RedStone says listed / not listed only. For a listed address we then ask
+ * OpenSanctions (RedStone's upstream, via our yente instance at YENTE_URL)
+ * which lists name it, so the page can say "Listed on OFAC SDN". That second
+ * lookup is best effort: if it fails, the address is still reported as listed,
+ * just without list names. It never turns a RedStone "listed" into "clear".
  *
  * IMPORTANT, and surfaced in the UI: this is an explanation, not the
  * attestation. It runs here, unsigned, after the fact. If it ever disagreed
- * with the on-chain verdict, the on-chain verdict is the one that counts —
- * and the disagreement would itself be the finding.
+ * with the on-chain verdict, the on-chain verdict is the one that counts.
  */
 
 export const runtime = "nodejs";
 
-export async function POST(req: Request) {
+const isAddress = (a: unknown): a is `0x${string}` => typeof a === "string" && /^0x[0-9a-fA-F]{40}$/.test(a);
+
+/** Dataset ids per address from yente, or {} if unavailable. */
+async function datasetsFor(addresses: string[]): Promise<Record<string, string[]>> {
   const base = process.env.YENTE_URL;
-  const dataset = process.env.YENTE_DATASET ?? "sanctions";
-
-  if (!base) {
-    return NextResponse.json({ ok: false, error: "YENTE_URL is not set." }, { status: 400 });
-  }
-
-  let addresses: string[] = [];
-  try {
-    const body = await req.json();
-    addresses = Array.isArray(body?.addresses) ? body.addresses.filter((a: unknown) => typeof a === "string") : [];
-  } catch {
-    return NextResponse.json({ ok: false, error: "Invalid JSON body" }, { status: 400 });
-  }
-
-  if (!addresses.length) {
-    return NextResponse.json({ ok: false, error: "No addresses supplied." }, { status: 400 });
-  }
-
-  // Same shape the oracle sends: one /match call, one query key per address.
+  if (!base || !addresses.length) return {};
   const queries: Record<string, unknown> = {};
   addresses.forEach((a, i) => {
     queries[`a${i}`] = { schema: "CryptoWallet", properties: { publicKey: [a] } };
   });
+  try {
+    const res = await fetch(
+      `${base.replace(/\/$/, "")}/match/${encodeURIComponent(process.env.YENTE_DATASET ?? "sanctions")}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ queries }),
+        signal: AbortSignal.timeout(6_000),
+        cache: "no-store",
+      },
+    );
+    if (!res.ok) return {};
+    const body = await res.json();
+    const out: Record<string, string[]> = {};
+    addresses.forEach((a, i) => {
+      const results = body?.responses?.[`a${i}`]?.results;
+      if (!Array.isArray(results)) return;
+      // match === true only: near-misses are not designations.
+      const ds = new Set<string>();
+      for (const r of results) if (r?.match === true) for (const d of r.datasets ?? []) ds.add(d);
+      out[a.toLowerCase()] = [...ds];
+    });
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+export async function POST(req: Request) {
+  let addresses: `0x${string}`[] = [];
+  try {
+    const body = await req.json();
+    addresses = Array.isArray(body?.addresses) ? body.addresses.filter(isAddress) : [];
+  } catch {
+    return NextResponse.json({ ok: false, error: "Invalid JSON body" }, { status: 400 });
+  }
+  if (!addresses.length) {
+    return NextResponse.json({ ok: false, error: "No addresses supplied." }, { status: 400 });
+  }
 
   try {
-    const res = await fetch(`${base.replace(/\/$/, "")}/match/${encodeURIComponent(dataset)}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ queries }),
-      signal: AbortSignal.timeout(12_000),
-      cache: "no-store",
-    });
+    const r = await redstoneScreen(addresses);
 
-    /**
-     * 503 is the screening API refusing to answer on stale data — the same
-     * refusal that makes the on-chain policy deny. Reported as its own
-     * condition, not as a generic failure: the page needs to tell a denial
-     * caused by a designation apart from one caused by not knowing.
-     */
-    if (res.status === 503) {
-      const detail = await res.json().catch(() => null);
+    // Same refusal the policy makes: a stale list is not screened against.
+    if (r.stale) {
       return NextResponse.json({
         ok: false,
         stale: true,
-        ageHours: detail?.ageHours ?? null,
-        error: "Screening data is stale; the service refused to answer.",
+        ageHours: Math.round(r.ageSeconds / 3600),
+        error: "The sanctions list is older than 8 days; screening refused.",
       });
     }
 
-    if (!res.ok) {
-      return NextResponse.json({ ok: false, error: `Screening API returned ${res.status}.` }, { status: 502 });
-    }
+    // List names only for addresses RedStone actually flags.
+    const listed = addresses.filter((_, i) => r.flags[i]);
+    const ds = await datasetsFor(listed);
 
-    const body = await res.json();
-
-    const out = addresses.map((address, i) => {
-      const results = body?.responses?.[`a${i}`]?.results;
-      if (!Array.isArray(results)) return { address, screened: false, sanctioned: null, datasets: [] };
-
-      /**
-       * `match === true` only. yente returns near-misses with match=false;
-       * treating a candidate as a hit is how a screening tool starts refusing
-       * people for resembling someone.
-       */
-      const hits = results.filter((r: any) => r && r.match === true);
-      const datasets: string[] = [];
-      for (const h of hits) for (const d of h.datasets ?? []) if (!datasets.includes(d)) datasets.push(d);
-
-      return { address, screened: true, sanctioned: hits.length > 0, datasets };
+    return NextResponse.json({
+      ok: true,
+      parties: addresses.map((address, i) => ({
+        address,
+        screened: true,
+        sanctioned: r.flags[i],
+        datasets: r.flags[i] ? ds[address.toLowerCase()] ?? [] : [],
+      })),
     });
-
-    return NextResponse.json({ ok: true, parties: out });
   } catch (err) {
-    return NextResponse.json(
-      { ok: false, error: err instanceof Error ? err.message : String(err) },
-      { status: 502 },
-    );
+    return NextResponse.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 502 });
   }
 }

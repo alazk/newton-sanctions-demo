@@ -35,6 +35,8 @@ import { useEffect, useRef, useState } from "react";
 import { GOALS, PROVIDERS, SANCTIONED_TEST_ADDRESS } from "@/lib/catalog";
 import { SANCTIONED_POOL } from "@/lib/sanctioned-pool";
 import { C, H, R, SP, T, BORDER, INSET_X } from "@/lib/ds";
+import { listNames } from "@/lib/datasets";
+import Intro from "@/components/Intro";
 
 /* ── Tokens ─────────────────────────────────────────────── */
 
@@ -187,33 +189,12 @@ const FILL: Record<Verdict, string> = {
   none: "linear-gradient(160deg, #FFD6CD, #DFA79C)",
 };
 
-/**
- * The four regimes the consolidated collection covers.
- *
- * One lookup runs against all of them, so reporting each on the verdict is a
- * true reading of a single result — not four queries. The distinction matters
- * for the screening step, which must not animate them being checked in turn.
+/*
+ * List names on a denial ("Listed on OFAC SDN · UK HM Treasury") come from
+ * lib/datasets.ts. They are the OpenSanctions datasets that name the wallet,
+ * looked up after the verdict for addresses RedStone flags. They only appear
+ * on a denial, and only for lists that actually matched.
  */
-const REGIMES = ["US", "EU", "UN", "UK"] as const;
-
-/**
- * Jurisdictions, not programme names.
- *
- * These chips only appear on a denial, and only for datasets that actually
- * matched — so this is the one place the page reports *which* list someone is
- * on, which is a finding rather than a label. It reads "US" instead of "OFAC"
- * to keep the four consistent: the others are already jurisdictions, and
- * mixing a US agency in with three countries made OFAC look like the point
- * rather than one source among several. The dataset ids underneath are
- * OpenSanctions' and are untouched.
- */
-const DATASET_REGIME: Record<string, (typeof REGIMES)[number]> = {
-  us_ofac_sdn: "US",
-  us_ofac_cons: "US",
-  eu_fsf: "EU",
-  un_sc_sanctions: "UN",
-  gb_hmt_sanctions: "UK",
-};
 
 const GOAL_ID = Object.keys(GOALS)[0];
 
@@ -246,6 +227,9 @@ export default function Wizard() {
    * transfer.
    */
   const [applied, setApplied] = useState(true);
+
+  /** The four-step intro shows on every load; "Start with a policy" closes it. */
+  const [intro, setIntro] = useState(true);
 
   /**
    * Nothing is prefilled. A demo that arrives with an address already in the
@@ -574,7 +558,9 @@ export default function Wizard() {
           flexDirection: "column",
         }}
       >
-        {run.status === "idle" && (
+        {run.status === "idle" && intro && <Intro health={health} onDone={() => setIntro(false)} />}
+
+        {run.status === "idle" && !intro && (
           <Console
             applied={applied}
             onApply={() => {
@@ -835,13 +821,13 @@ function Console(props: {
               </span>
             </div>
 
-            {/* Says "list", not "feed", while the denylist policy is bound.
-                The screening is a fixed on-chain set of addresses right now,
-                not a live consolidated lookup, and a card claiming otherwise
-                would be the one kind of wrong this whole project is about. */}
+            {/* Bound policy: RedStone Sanctions Oracle (policy/redstone). Every
+                claim here must stay true of it: 463 lists via OpenSanctions,
+                weekly updates, refuses to screen past 8 days. */}
             <div style={{ ...T.value, fontFamily: SANS, color: BODY, marginTop: SP.x2, maxWidth: "46ch" }}>
-              Blocks the transfer if the recipient is on the sanctions list. Enforced by an operator
-              quorum before it executes.
+              Blocks the transfer if either party is on the RedStone Sanctions Oracle: 463 official
+              lists including OFAC, EU, UN and UK, updated weekly. Enforced by an operator quorum
+              before it executes.
             </div>
 
             <div style={{ marginTop: "auto", paddingTop: SP.x3, ...label(), color: applied ? INK : FLAG }}>
@@ -1029,7 +1015,8 @@ function Pickers({
     {
       value: "ofac",
       text: "Sanctioned address",
-      hint: `A real sanctioned wallet, present in the deployed list`,
+      // All 24 in lib/sanctioned-pool.ts verified flagged by RedStone, Oct 9 2026.
+      hint: `A real sanctioned wallet, flagged by RedStone's list`,
     },
   ];
 
@@ -1052,7 +1039,9 @@ function Pickers({
         aria-label={`Fill the ${party} with`}
         onKeyDown={onKeyDown}
         className="pe-radios"
-        style={{ display: "flex", gap: SP.x3, flexWrap: "wrap" }}
+        // Two equal halves spanning the field above, so the pair is symmetric
+        // with the input and the action button rather than hugging the left.
+        style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: SP.x1_5 }}
       >
         {opts.map((o) => (
           <Radio
@@ -1094,13 +1083,23 @@ function Radio({
       title={title}
       className="pe-reset"
       style={{
-        display: "inline-flex",
+        // A full-width option tile: same border and radius as the field above,
+        // so the two read as one block of controls.
+        display: "flex",
         alignItems: "center",
+        justifyContent: "center",
         gap: SP.x1_5,
-        minHeight: H.radio,
+        width: "100%",
+        height: H.control,
+        padding: `0 ${SP.x2}px`,
+        borderRadius: R.sm,
+        border: `${BORDER}px solid ${checked ? INK : CONTROL}`,
+        background: SURFACE,
         ...T.valueSm,
         fontFamily: SANS,
         color: INK,
+        cursor: "pointer",
+        transition: "border-color 0.14s ease",
       }}
     >
       <span
@@ -1353,6 +1352,7 @@ function Cta({
     justifyContent: "center",
     gap: SP.x1,
     cursor: "pointer",
+    whiteSpace: "nowrap",
     ...label(),
     // fill's colours come from .pe-dark, so its :hover works (inline styles
     // would out-specify the hover rule); outline sets its own flat colours.
@@ -1407,7 +1407,10 @@ function Decision({
   if (p?.to?.sanctioned) flagged.push("recipient");
 
   const allDatasets = [...(p?.to?.datasets ?? []), ...outcome.datasets];
-  const regimes = [...new Set(allDatasets.map((d) => DATASET_REGIME[d]).filter(Boolean))];
+  const named = listNames(allDatasets);
+  // RedStone flagged it but the list-name lookup came back empty: still say
+  // where the match came from rather than showing nothing.
+  const regimes = named.length ? named : p?.to?.sanctioned ? ["RedStone sanctions list"] : [];
 
   /**
    * Only claimed once attribution has come back. Before that the verdict is
@@ -1537,6 +1540,9 @@ function Decision({
           {regimes.map((r) => (
             <Tag key={r} tone="strong">{r}</Tag>
           ))}
+          {named.length > 0 && (
+            <span style={{ ...small(), color: "rgba(27,27,27,0.5)" }}>· list names via OpenSanctions</span>
+          )}
         </div>
       )}
 
@@ -1765,7 +1771,30 @@ function extractAllow(result: any): boolean | undefined {
   if (typeof result?.result?.allow === "boolean") return result.result.allow;
   if (typeof result?.allow === "boolean") return result.allow;
   if (typeof result?.result === "boolean") return result.result;
+
+  /*
+   * Protocol 0.7: newt_createTask returns the verdict as a boolean `allowed`
+   * on the attested task response (next to `intent`, `initialization_timestamp`),
+   * with no bytes32 evaluation_result. Its exact nesting isn't documented, so
+   * collect every boolean `allowed` in the response and accept it only if they
+   * all agree — any disagreement stays undefined, i.e. fail closed.
+   */
+  const found = collectBool(result, "allowed");
+  if (found.length && found.every((b) => b === found[0])) return found[0];
   return undefined;
+}
+
+function collectBool(node: unknown, key: string, out: boolean[] = [], depth = 0): boolean[] {
+  if (!node || typeof node !== "object" || depth > 8) return out;
+  if (Array.isArray(node)) {
+    for (const n of node) collectBool(n, key, out, depth + 1);
+    return out;
+  }
+  for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+    if (k === key && typeof v === "boolean") out.push(v);
+    else if (v && typeof v === "object") collectBool(v, key, out, depth + 1);
+  }
+  return out;
 }
 
 /**

@@ -33,17 +33,39 @@ the server.
 | Variable | Purpose |
 | --- | --- |
 | `NEWTON_API_KEY` | Authenticates to the Newton gateway. Server-side only. Its account must **own the PolicyClient on-chain**, or the gateway returns 401. |
-| `POLICY_CLIENT_DENYLIST` | The PolicyClient tasks are submitted against — currently `0x749753713fC04bbDB5dAf9C66cdE293512fe0eE7`. |
+| `POLICY_CLIENT_DENYLIST` | The PolicyClient tasks are submitted against — currently `0x57F4fB0a4A4b34eA51D47BC7c99c960b80A58D18`. |
 | `NEXT_PUBLIC_POLICY_CLIENT` | Same client address, for display. Baked at build time. |
 | `SEPOLIA_RPC_URL` | Optional. Defaults to a public endpoint. |
 
 On Vercel these live under Settings → Environment Variables; changing them
 needs a redeploy to take effect.
 
-The demo runs on PolicyClient `0x749753…`, bound to the denylist policy
-`0x627222E7…` (CID `bafkreigvmehm…`, entrypoint `newton_sanctions.allow`, 119
-addresses). Owner/signer is `0x8b4bA870…`. An earlier client, `0xfd0545…`, was
-repurposed by another project — do not point the demo back at it.
+The demo runs on Newton protocol **0.7**. PolicyClient `0x57F4fB0a…` (our own
+`SanctionsDemoClient`, source in `policy/SanctionsDemoClient.sol`) holds a
+one-policy set: the **RedStone sanctions policy** `0xd0Ff7aca199AeaCC5F316b029A476Da7684a3877`
+(source in `policy/redstone/`, entrypoint `newton_redstone.allow`). Its WASM
+oracle reads the RedStone Sanctions Oracle on Ethereum mainnet
+(`0x574Ad490…`: 463 official lists via OpenSanctions, updated weekly) for payee
+and payer, and the policy denies with `screening_unavailable` if that list is
+more than 8 days old. Owner/signer is `0x8b4bA870…`.
+
+`/api/screen` and `/api/screening-health` read the same RedStone contract
+(`lib/redstone.ts`), so the page's "who is listed" and freshness line come from
+the operators' source. `/api/evaluate` builds `wasm_args` per policy from the
+client's on-chain set (`lib/policy-set.ts`): oracle args for WASM policies,
+`"0x"` for pure-Rego ones, which the gateway requires.
+
+**Fallback:** `node policy/setpolicies-v07.mjs --confirm` puts the frozen
+119-address denylist policy (`0x95c66b29…`) back on the client; set
+`providers: ["local-denylist"]` in `lib/catalog.ts` to match the copy.
+**Usage:** `node policy/usage.mjs` counts real checks since launch (Sep 10).
+
+Why a custom client: the 0.7 upgrade (Sept 2026) made the gateway read a policy
+*set* (`getPolicies`, interface id `0xf67e14d6`). Older clients (`0x749753…`,
+`0xfd0545…`) can't be migrated, and the public newton-contracts repo lags the
+deployed protocol, so the client implements the v0.7 interface from
+`@newton-xyz/sdk` 1.2.2's `NewtonPolicyClientAbi`. `newt_createTask` must send
+`wasm_args` as an array, one entry per policy (`"0x"` for pure Rego).
 
 ---
 

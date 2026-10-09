@@ -1,0 +1,11 @@
+# Non-secret defaults for `newton-cli policy deploy -p <policy-dir>`.
+# CLI flags and environment variables take precedence over this file.
+chain_id = 11155111
+
+# Optional PolicyData expiration in blocks. When omitted, the CLI converts its
+# 300-second default using the target chain's observed block time.
+# expire_after_blocks = 150
+
+# Optional Newton gateway override. The CLI uploads artifacts through its RPC
+# endpoint and reads them from the public object endpoint.
+# gateway_url = "https://gateway.testnet.newton.xyz"

@@ -30,7 +30,7 @@ from the owner's machine.
 | Stale banner "a verdict can be confidently wrong" | False under RedStone (policy refuses past 8 days) | Copy now says the policy will refuse until the list updates |
 | "The signed result can't be altered" (intro) | Overclaim | Now "Every check links to its signed record on the Newton explorer" |
 | "A randomly generated address, which is on no list" | Overclaim | Now "A freshly generated random address with no history" |
-| List names ("Listed on OFAC SDN") | Unsigned lookup, was labelled only "via OpenSanctions" | Now "via OpenSanctions, an unsigned lookup" |
+| List names ("Listed on OFAC SDN") | Unsigned lookup, not part of the attestation | Labelled "source: OpenSanctions" (owner's choice of wording); README and the route docs state it is unsigned |
 | Picker "real sanctioned wallet" | Verified Oct 9 (all 24 pool addresses flagged by RedStone) | Re-check when RedStone updates (see below) |
 | Em dashes in user-facing copy | 3 in Wizard, several in API error text | All removed from visible copy |
 

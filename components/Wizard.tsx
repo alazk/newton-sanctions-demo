@@ -1501,7 +1501,7 @@ function ListedOn({
           className="pe-chip"
           style={{ ...small(), color: "rgba(27,27,27,0.5)", animationDelay: `${base + names.length * 0.12}s` }}
         >
-          · list names via OpenSanctions, an unsigned lookup
+          · source: OpenSanctions
         </span>
       )}
     </div>

@@ -1,5 +1,9 @@
 # Two blockers on Sepolia
 
+> **Historical.** Both blockers predate protocol 0.7. Policies uploaded through
+> Newton's gateway with newton-cli 0.7.2 are ingested by the operators (the
+> live RedStone policy was deployed that way on Oct 9 2026).
+
 Both reproducible, both outside our control. Written for Newton; kept here so
 the evidence survives.
 

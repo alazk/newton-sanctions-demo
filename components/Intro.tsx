@@ -47,12 +47,12 @@ const STEPS = [
   {
     eyebrow: "Part 1 · The check",
     title: "A policy decides what to check.",
-    body: "A policy is a rule plus the data it reads. Here the data is the RedStone Sanctions Oracle, which keeps 463 official lists onchain, and the rule blocks the payment if the wallet is on any of them.",
+    body: "A policy is a rule plus the data it reads. Here the data is the RedStone Sanctions Oracle, an onchain list RedStone builds from 463 official sources, and the rule blocks the payment if the wallet is on it.",
   },
   {
     eyebrow: "Part 2 · Enforcement",
     title: "Newton enforces it.",
-    body: "Newton Protocol operators run the policy on the wallet you are about to pay, and a quorum signs the result. The signed result can't be altered, and anyone can check it on the explorer.",
+    body: "Newton Protocol operators run the policy on the wallet you are about to pay, and a quorum signs the result. Every check links to its signed record on the Newton explorer.",
   },
 ] as const;
 

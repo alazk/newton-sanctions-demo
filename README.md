@@ -1,25 +1,55 @@
 # Newton Sanctions Demo
 
-Enter a recipient address. It is screened against a sanctions list and an
-operator quorum signs the decision on Ethereum Sepolia **before** the transfer
-would execute. The verdict is a real `newt_createTask` with an attestation you
-can open in the Newton Explorer — not a simulation.
+Enter a recipient address. Newton Protocol operators check it against the
+**RedStone Sanctions Oracle** on Ethereum mainnet, and an operator quorum signs
+the decision on Ethereum Sepolia **before** the transfer would execute. Every
+verdict is a real `newt_createTask` with an attestation you can open in the
+Newton Explorer, not a simulation.
 
-The recipient is the only thing screened. Each run also carries a sender
-(transactions need one), but it is freshly generated and the policy does not
-consult it — the screen has a single input on purpose.
+The policy screens both parties. The page sends a freshly generated random
+sender with each check, so in practice only the recipient you choose can cause
+a denial.
 
-Live: **https://sanctions-demo.newt.foundation** (hosted on the Newton team
-Vercel project `newton-aml-ofac-policy-engine`).
+Live: **https://sanctions-demo.newt.foundation** (Newton team Vercel project
+`newton-aml-ofac-policy-engine`). Last audited Oct 2026: see `AUDIT.md`.
+
+---
+
+## How it works
+
+```
+page ─▶ /api/evaluate ─▶ newt_createTask ─▶ operators run policy/redstone ─▶ quorum signs
+                                                  │
+                                                  └─▶ RedStone Sanctions Oracle (Ethereum mainnet)
+```
+
+- **PolicyClient** `0x57F4fB0a4A4b34eA51D47BC7c99c960b80A58D18`: our own
+  v0.7 client (`policy/SanctionsDemoClient.sol`), owned by `0x8b4bA870…`, the
+  wallet behind the Newton API key. Its policy set holds one policy.
+- **Policy** `0xd0Ff7aca199AeaCC5F316b029A476Da7684a3877` (`policy/redstone/`,
+  entrypoint `newton_redstone.allow`, params `max_list_age_seconds: 691200`).
+  Its WASM oracle reads RedStone's contract `0x574Ad490fE8087B580DB227a8Ca7EfB7C19Dc8C4`
+  (`areSanctioned`, `getLastUpdateBlockTimestamp`) for payee and payer. RedStone
+  says the list is built from 463 official sources via OpenSanctions (OFAC, EU,
+  UN, UK and others) and updated weekly.
+- **Fails closed.** The policy denies if either party is listed, if the oracle
+  could not screen (`screening_unavailable`, `payee_not_screened`), or if the
+  list is more than 8 days old.
+- **Native transfers only.** The policy screens `intent.to`. For a token
+  transfer that is the token contract, so ERC-20 recipients are not screened.
+
+After a verdict, the page explains it with `/api/screen`: which party RedStone
+flags and, via an OpenSanctions lookup, which list names them ("OFAC SDN").
+That explanation is unsigned and labelled as such; the attestation is the
+verdict.
 
 ---
 
 ## Setup
 
 ```bash
-cd policy-builder
 npm install
-cp .env.local.example .env.local   # fill in — see below
+cp .env.local.example .env.local   # fill in, see below
 bash dev.sh
 ```
 
@@ -28,122 +58,89 @@ the server.
 
 ### Environment
 
-`.env.local` is gitignored; a fresh clone will not run without it.
+`.env.local` is gitignored. The site reads:
 
-| Variable | Purpose |
-| --- | --- |
-| `NEWTON_API_KEY` | Authenticates to the Newton gateway. Server-side only. Its account must **own the PolicyClient on-chain**, or the gateway returns 401. |
-| `POLICY_CLIENT_DENYLIST` | The PolicyClient tasks are submitted against — currently `0x57F4fB0a4A4b34eA51D47BC7c99c960b80A58D18`. |
-| `NEXT_PUBLIC_POLICY_CLIENT` | Same client address, for display. Baked at build time. |
-| `SEPOLIA_RPC_URL` | Optional. Defaults to a public endpoint. |
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `NEWTON_API_KEY` | yes | Gateway auth. Server-side only. Its account's wallet must **own the PolicyClient on-chain**. |
+| `POLICY_CLIENT_REDSTONE` | yes | The one client every check is submitted to. No fallback: unset means the route refuses. |
+| `YENTE_URL`, `YENTE_DATASET` | no | OpenSanctions lookup for list names after a denial. Unset: verdicts still work, without list names. |
+| `MAINNET_RPC_URL`, `SEPOLIA_RPC_URL` | no | The page's own reads. Keyless public defaults. |
+| `NEWTON_GATEWAY_URL` | no | Only for a non-production gateway. |
 
 On Vercel these live under Settings → Environment Variables; changing them
-needs a redeploy to take effect.
+needs a redeploy.
 
-The demo runs on Newton protocol **0.7**. PolicyClient `0x57F4fB0a…` (our own
-`SanctionsDemoClient`, source in `policy/SanctionsDemoClient.sol`) holds a
-one-policy set: the **RedStone sanctions policy** `0xd0Ff7aca199AeaCC5F316b029A476Da7684a3877`
-(source in `policy/redstone/`, entrypoint `newton_redstone.allow`). Its WASM
-oracle reads the RedStone Sanctions Oracle on Ethereum mainnet
-(`0x574Ad490…`: 463 official lists via OpenSanctions, updated weekly) for payee
-and payer, and the policy denies with `screening_unavailable` if that list is
-more than 8 days old. Owner/signer is `0x8b4bA870…`.
+### Routes
 
-`/api/screen` and `/api/screening-health` read the same RedStone contract
-(`lib/redstone.ts`), so the page's "who is listed" and freshness line come from
-the operators' source. `/api/evaluate` builds `wasm_args` per policy from the
-client's on-chain set (`lib/policy-set.ts`): oracle args for WASM policies,
-`"0x"` for pure-Rego ones, which the gateway requires.
+| Route | Purpose | Limits |
+| --- | --- | --- |
+| `/api/evaluate` | Submits the task (submit only). | 6 / min / IP, validated input |
+| `/api/screen` | Which party and which list. Unsigned explanation. | 20 / min / IP, exactly the transfer's 1 or 2 addresses |
+| `/api/screening-health` | Age of RedStone's list. | Cached 60 s |
 
-**Fallback:** `node policy/setpolicies-v07.mjs --confirm` puts the frozen
-119-address denylist policy (`0x95c66b29…`) back on the client; set
-`providers: ["local-denylist"]` in `lib/catalog.ts` to match the copy.
-**Usage:** `node policy/usage.mjs` counts real checks since launch (Sep 10).
-
-Why a custom client: the 0.7 upgrade (Sept 2026) made the gateway read a policy
-*set* (`getPolicies`, interface id `0xf67e14d6`). Older clients (`0x749753…`,
-`0xfd0545…`) can't be migrated, and the public newton-contracts repo lags the
-deployed protocol, so the client implements the v0.7 interface from
-`@newton-xyz/sdk` 1.2.2's `NewtonPolicyClientAbi`. `newt_createTask` must send
-`wasm_args` as an array, one entry per policy (`"0x"` for pure Rego).
+The rate limits are in-memory per instance. For real protection add a Vercel
+Firewall rate-limit rule on `/api/evaluate` and `/api/screen`.
 
 ---
 
-## How it works
-
-```
-UI ──▶ /api/evaluate ──▶ newt_createTask ──▶ operator quorum ──▶ attestation
-```
-
-The policy is written in Rego and screens the recipient against a list of
-sanctioned addresses held in the PolicyClient's on-chain parameters. Every
-operator evaluates the identical rule against the identical list and signs the
-same verdict; the combined signature is the attestation the smart contract
-would check before releasing funds.
-
-The rule fails closed: an empty or missing list denies rather than approves —
-an empty sanctions list is not evidence that an address is clean.
-
----
-
-## The sanctions list
-
-`lib/ofac-full.ts` holds every sanctioned Ethereum address from a **point-in-time
-snapshot** of the OpenSanctions feed (all regimes — currently ~119, across US
-OFAC, Israel, Japan and France). It is captured once and frozen on-chain; it does
-not track the feed automatically.
-
-To cut a new snapshot, regenerate the list from the `sanctions-api` data and push
-it to the on-chain params by hand:
+## Operating it
 
 ```bash
-node scripts/emit-full-list.mjs         # reads ../sanctions-api/wallets.json → lib/ofac-full.ts
+# Real tasks against a client (read the key, never type it inline)
+read -rs "NEWTON_API_KEY?Key: " && export NEWTON_API_KEY
+node policy/task-test.mjs 0x57F4fB0a4A4b34eA51D47BC7c99c960b80A58D18 0x1111111111111111111111111111111111111111
+node policy/task-test.mjs 0x57F4fB0a4A4b34eA51D47BC7c99c960b80A58D18 0x175d44451403edf28469df03a9280c1197adb92c
 
-set -a; source ../deploy/.env; set +a   # OWNER_PRIVATE_KEY etc.
-node policy/setparams.mjs               # dry run
-node policy/setparams.mjs --confirm     # send (one transaction, skips if unchanged)
+# How many checks since launch
+node policy/usage.mjs
 ```
 
-Always re-test a **clean** address afterward — a failed params write makes the
-policy deny everything, which looks identical to it working.
+**Changing the policy.** Build and simulate with `newton-cli` in
+`policy/redstone/` (see its README), deploy with `newton-cli policy deploy`,
+bind it to the throwaway test client `0x6DeD0ACa06D76FEF4ec8254B8f661edbC387cf2A`
+first, run `task-test.mjs` against it, and only then `setPolicies` on the live
+client. Deploy the site before switching the policy if the page's request shape
+changes.
+
+**Fallback.** `node policy/setpolicies-v07.mjs --confirm` (needs
+`OWNER_PRIVATE_KEY` from `../deploy/.env`) puts the frozen 119-address denylist
+policy `0x95c66b29…` back on the live client. The page copy names RedStone and
+would then be wrong, so treat this as an emergency switch.
+
+**Why a custom client.** The 0.7 upgrade (Sept 2026) made the gateway read a
+policy *set* (`getPolicies`, interface id `0xf67e14d6`). Older clients
+(`0x749753…`, `0xfd0545…`) cannot be migrated and the public newton-contracts
+repo lags the deployed protocol, so `SanctionsDemoClient` implements the 0.7
+interface from `@newton-xyz/sdk` 1.2.2's `NewtonPolicyClientAbi` (the repo has
+1.1.0 installed; 1.2.2 was read from npm).
 
 ---
 
-## Routes
-
-| Route | Purpose |
-| --- | --- |
-| `/api/evaluate` | Submits the task. Rate-limited per IP. |
-| `/api/screen` | Which lists an address is on. Explanation, not attestation. |
-| `/api/screening-health` | Freshness of the sanctions data. |
-
----
-
-## Deploying
+## Deploying the site
 
 ```bash
 bash deploy.sh "what changed"
 ```
 
-Refuses if a `.env` file is staged, typechecks, runs the production build
-locally, then commits, pushes, and promotes with `vercel --prod`. Deploys the
-site only; the on-chain policy is managed separately (`policy/DEPLOY.md`).
+Refuses if a `.env` file is staged, typechecks, runs the production build,
+then commits, pushes, and promotes with `vercel --prod`. The on-chain policy is
+managed separately (above).
 
 ---
 
 ## Design system
 
-`lib/ds.ts` holds the tokens — 8px spacing grid, radii, control heights, type
-scale, colour. Components read from it rather than carrying inline values.
-Verdict fills carry the only meaningful colour; interaction is ink.
+`lib/ds.ts` holds the tokens: 8px spacing grid, radii, control heights, type
+scale, colour. Verdict fills carry the only meaningful colour; interaction is
+ink.
 
 ---
 
 ## Notes
 
-- Runs on **Ethereum Sepolia**, a test network.
-- The list is a **frozen snapshot** — it does not pick up a designation made
-  after the snapshot was cut. Re-run the steps under "The sanctions list" to
-  capture a newer one.
-- An oracle-backed variant that screens a live feed at evaluation time lives in
-  `../sanctions-oracle/`; `policy/DEPLOY.md` covers deploying it.
+- Signing happens on **Ethereum Sepolia**, a test network. The sanctions data
+  is read from **Ethereum mainnet**.
+- History: `STATUS.md` (current state), `AUDIT.md` (Oct 2026 audit).
+  `policy/DEPLOY.md`, `policy/NEWTON-ISSUE.md` and `NEWTON-SETUP.md` describe
+  the pre-0.7 setup and are kept as history.

@@ -40,7 +40,8 @@ if [ "$BRANCH" != "main" ]; then
 fi
 
 echo "==> Checking nothing secret is staged"
-if git status --porcelain | grep -qE '\.env(\.|$)'; then
+# Any .env file except the committed templates.
+if git status --porcelain | grep -E '\.env(\.|$)' | grep -qvE '\.example$'; then
   echo "STOP — a .env file is about to be committed."
   git status --porcelain | grep -E '\.env(\.|$)'
   echo "These hold your private keys and API key. Add them to .gitignore first."
@@ -77,10 +78,9 @@ git push -u origin "$BRANCH"
 
 # Why not just rely on the push:
 #
-# The project has no domain alias attached, so a git push deploys to a fresh
-# preview URL and leaves newton-policy-builder.vercel.app pointing at whatever
-# was there before. That has cost several rounds of "it's still the old one".
-# --prod is what moves the alias.
+# A git push alone deploys to a fresh preview URL and leaves
+# sanctions-demo.newt.foundation pointing at whatever was there before. That
+# has cost several rounds of "it's still the old one". --prod moves the alias.
 if [ "$PROMOTE" = "1" ]; then
   echo "==> Promoting to production"
   npx vercel --prod
@@ -88,6 +88,6 @@ else
   echo "==> Preview deploy (branch '$BRANCH')"
   npx vercel
   echo
-  echo "    newton-policy-builder.vercel.app is unchanged."
+  echo "    sanctions-demo.newt.foundation is unchanged."
   echo "    Merge to main and run this again to promote."
 fi

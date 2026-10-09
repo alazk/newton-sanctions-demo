@@ -151,7 +151,7 @@ export default async function OpengraphImage() {
               }}
             >
               <span style={{ fontSize: 21, fontWeight: 600, color: INK }}>RedStone Sanctions Oracle</span>
-              <span style={{ fontSize: 16, color: MUTED, marginTop: 4, marginBottom: 8 }}>463 official lists, onchain</span>
+              <span style={{ fontSize: 16, color: MUTED, marginTop: 4, marginBottom: 8 }}>Built from 463 official lists</span>
               <Row w={160} />
               <Row hit w={130} />
               <Row w={180} />

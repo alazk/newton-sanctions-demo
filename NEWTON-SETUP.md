@@ -1,5 +1,11 @@
 # Newton policy setup — a placeholder runbook
 
+> **Historical (pre-0.7).** Written for protocol 0.5: one policy per client,
+> `setPolicyAddress` / `setPolicy`, a single `wasm_args` string and a bytes32
+> verdict. Protocol 0.7 uses policy sets (`setPolicies`), a `wasm_args` array
+> (one entry per policy) and a boolean `allowed`. For the current setup see
+> `README.md`, `policy/redstone/README.md` and `AUDIT.md`.
+
 How to stand up a Newton Protocol policy end to end: write the Rego, deploy it,
 bind a PolicyClient, load params, wire an app, and verify a real quorum-signed
 task. Every account- or deployment-specific value is a `<PLACEHOLDER>` — fill

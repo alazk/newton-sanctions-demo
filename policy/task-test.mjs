@@ -1,7 +1,10 @@
 /**
  * Submit one real, quorum-signed task to the Newton gateway and print the verdict.
  *
- *   NEWTON_API_KEY=… node policy/task-test.mjs <client> <to> [n_policies]
+ *   read -rs "NEWTON_API_KEY?Key: " && export NEWTON_API_KEY && node policy/task-test.mjs <client> <to> [n_policies]
+ *
+ * (Read the key with `read -rs`, never type it inline: inline values land in
+ * shell history.)
  *
  * wasm_args (protocol 0.7) is one entry per policy in the client's set. Every
  * entry carries { to, from } hex-encoded; a pure-Rego policy ignores its entry.

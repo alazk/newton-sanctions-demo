@@ -36,7 +36,12 @@ const ABI = [
 
 const client = createPublicClient({
   chain: mainnet,
-  transport: http(process.env.MAINNET_RPC_URL || "https://ethereum-rpc.publicnode.com", { timeout: 10_000 }),
+  // One retry, not viem's default three: a slow RPC should fail fast here
+  // rather than hold the page for ~40s.
+  transport: http(process.env.MAINNET_RPC_URL || "https://ethereum-rpc.publicnode.com", {
+    timeout: 8_000,
+    retryCount: 1,
+  }),
 });
 
 /** List age, pinned to one block so "now" and "last update" agree. */

@@ -46,13 +46,18 @@ const POLICY_ABI = [
 
 const chain = createPublicClient({
   chain: sepolia,
-  transport: http(process.env.SEPOLIA_RPC_URL || "https://ethereum-sepolia-rpc.publicnode.com", { timeout: 8_000 }),
+  // One retry: a slow RPC should fail fast, not hold the check for ~30s.
+  transport: http(process.env.SEPOLIA_RPC_URL || "https://ethereum-sepolia-rpc.publicnode.com", {
+    timeout: 6_000,
+    retryCount: 1,
+  }),
 });
 
 const TTL_MS = 60_000;
 const cache = new Map<string, { at: number; usesWasm: boolean[] }>();
 
-async function usesWasm(policy: `0x${string}`): Promise<boolean> {
+/** true / false when the chain answered; null when neither getter could be read. */
+async function usesWasm(policy: `0x${string}`): Promise<boolean | null> {
   for (const functionName of ["getWasmCid", "wasmCid"] as const) {
     try {
       const cid = await chain.readContract({ address: policy, abi: POLICY_ABI, functionName });
@@ -61,9 +66,7 @@ async function usesWasm(policy: `0x${string}`): Promise<boolean> {
       /* try the other spelling */
     }
   }
-  // Unknown: assume it needs args. A pure-Rego policy rejects them loudly,
-  // which is a visible error rather than a silent wrong verdict.
-  return true;
+  return null;
 }
 
 /**
@@ -82,8 +85,12 @@ export async function wasmArgsFor(client: string, args: string): Promise<string[
       abi: CLIENT_ABI,
       functionName: "getPolicies",
     });
-    const flags = await Promise.all(set.map((s) => usesWasm(s.policy)));
-    cache.set(key, { at: Date.now(), usesWasm: flags });
+    const read = await Promise.all(set.map((s) => usesWasm(s.policy)));
+    // Unknown → assume the policy needs args (a pure-Rego policy rejects them
+    // loudly rather than giving a wrong verdict). A guess is never cached:
+    // only a set read cleanly is remembered.
+    const flags = read.map((w) => w ?? true);
+    if (read.every((w) => w !== null)) cache.set(key, { at: Date.now(), usesWasm: flags });
     return flags.map((w) => (w ? args : "0x"));
   } catch {
     return null;

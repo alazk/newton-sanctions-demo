@@ -54,8 +54,32 @@ const POLICIES = {
  * Add a line here whenever setPolicies produces a new policyId.
  */
 const POLICY_IDS = {
-  "0x34addc4872768487ad553a23a8b7e85e792e9563ba57d7addc983e20ee4caded": "denylist v0.7 (live since Sep 28)",
+  "0x34addc4872768487ad553a23a8b7e85e792e9563ba57d7addc983e20ee4caded": "denylist v0.7 (Sep 28 – Oct 9)",
+  "0x10596ed033b91d2719f6ea5b2c79cee5c8b879fec8c7ae77b20ac6c8456c0a2c": "denylist v0.7 (Oct 9 rollback)",
 };
+
+/**
+ * Every setPolicies call mints a new set id, so the CURRENT id of each demo
+ * client is read from chain at run time rather than hard-coded here.
+ */
+const LIVE_CLIENTS = {
+  "0x57F4fB0a4A4b34eA51D47BC7c99c960b80A58D18": "RedStone (live client)",
+};
+async function currentPolicyId(client) {
+  const rpc = process.env.SEPOLIA_RPC_URL || "https://ethereum-sepolia-rpc.publicnode.com";
+  const r = await fetch(rpc, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: client, data: "0xef7b2be2" }, "latest"] }),
+  })
+    .then((x) => x.json())
+    .catch(() => null);
+  return typeof r?.result === "string" && r.result.length === 66 && !/^0x0+$/.test(r.result) ? r.result : null;
+}
+for (const [client, label] of Object.entries(LIVE_CLIENTS)) {
+  const id = await currentPolicyId(client);
+  if (id && !POLICY_IDS[id]) POLICY_IDS[id] = label;
+}
 
 /** Public launch. Checks before this were development. --since / --all override. */
 const LAUNCH = "2026-09-10";
@@ -81,7 +105,7 @@ const KEY_SOURCES = [
   ["deploy/.env", fromEnvFile(join(ROOT, "../deploy/.env"), "NEWTON_API_KEY")],
 ];
 const [KEY_FROM, KEY] = KEY_SOURCES.find(([, v]) => v && v.trim()) ?? [null, null];
-if (KEY) process.stderr.write(`using ${KEY_FROM} (${KEY.slice(0, 6)}…, ${KEY.length} chars)\n`);
+if (KEY) process.stderr.write(`using ${KEY_FROM}\n`);
 if (!KEY) {
   console.error("NEWTON_API_KEY not found in env, .env.local or ../deploy/.env");
   process.exit(1);

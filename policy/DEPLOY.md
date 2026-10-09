@@ -1,7 +1,8 @@
 # Deploying the corrected policy
 
-> For the current live/parked state and the switch-to-yente steps, read
-> **`../STATUS.md`** first. This file is the deeper on-chain runbook.
+> **Historical (pre-0.7, Aug–Sept 2026).** Everything below describes clients
+> and policies that no longer run the site (0xfd0545…, 0x749753…, yente). For
+> the current setup read `../STATUS.md`, `../README.md` and `../AUDIT.md`.
 
 ## What the site is running RIGHT NOW
 

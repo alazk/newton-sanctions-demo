@@ -155,10 +155,16 @@ function withAttribution(o: Outcome, sj: ScreenResult | null, allow: boolean): O
   if (sj?.ok && sj.parties) {
     return { ...o, attribution: "done", parties: { to: sj.parties[0], from: sj.parties[1] } };
   }
+  // List past 8 days, but the recipient IS on it: the denial stands as a real
+  // designation. Never tell anyone "nobody was found" about a listed address.
+  if (sj?.stale && !allow && sj.parties?.[0]?.sanctioned === true) {
+    return { ...o, attribution: "done", parties: { to: sj.parties[0], from: sj.parties[1] } };
+  }
   if (sj?.stale && !allow) {
     return {
       ...o,
       attribution: "failed",
+      parties: undefined,
       verdict: "unavailable",
       headline: "Screening unavailable",
       reason:
@@ -167,7 +173,7 @@ function withAttribution(o: Outcome, sj: ScreenResult | null, allow: boolean): O
           : "The policy could not screen against a current sanctions list, so it refused. The transfer is blocked. Nobody has been found on a list.",
     };
   }
-  return { ...o, attribution: "failed" };
+  return { ...o, attribution: "failed", parties: undefined };
 }
 
 type Outcome = {
@@ -187,6 +193,10 @@ type Outcome = {
    * the panel around.
    */
   attribution?: "pending" | "done" | "failed";
+  /** Which check this outcome belongs to (see runSeq). */
+  runId?: number;
+  /** The recipient that was actually screened, not whatever is in the box now. */
+  screenedTo?: string;
   /**
    * When the decision was read.
    *
@@ -278,15 +288,10 @@ export default function Wizard() {
   /*
    * There is no sender state, and no sender field.
    *
-   * A transaction still has a sender — verify() generates fresh random 20
-   * bytes — but the deployed policy no longer screens it. The payer rules were
-   * removed in the redeploy that fixed the confidence gate, precisely because
-   * this page had stopped asking for a sender: `payer_sanctioned` could never
-   * fire against a generated address, while `payer_not_screened` and
-   * `payer_address_mismatch` could still fire spuriously and deny a clean
-   * recipient for a reason having nothing to do with the recipient.
-   *
-   * See sanctions-oracle/yente-policy-files/policy.rego.
+   * A transaction still has a sender: verify() generates fresh random 20
+   * bytes. The RedStone policy (policy/redstone/policy.rego) screens both
+   * parties, so a random, never-used sender keeps the recipient the only
+   * thing a visitor's check can be denied for.
    */
 
   /**
@@ -325,6 +330,8 @@ export default function Wizard() {
 
   const stageRef = useRef<HTMLDivElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  /** Increments per check, so late answers can only land on their own run. */
+  const runSeq = useRef(0);
 
   const toValid = isAddress(to);
   const busy = run.status === "running";
@@ -375,12 +382,13 @@ export default function Wizard() {
     /**
      * A fresh sender every run.
      *
-     * Not for the policy — that no longer screens the payer. For the intent:
-     * every transaction has a `from`, and the oracle refuses a request without
-     * one. Random 20 bytes keeps the recipient the only thing under test.
+     * The policy screens both parties. A random, never-used sender keeps the
+     * recipient the only thing under test, so a denial is about the address
+     * the visitor chose.
      */
     const sendTo = to;
     const sendFrom = randomOrdinary();
+    const runId = ++runSeq.current;
 
     const ac = new AbortController();
     abortRef.current = ac;
@@ -429,9 +437,24 @@ export default function Wizard() {
         return;
       }
 
-      const taskError = json.result?.error ?? json.result?.operator_errors?.[0]?.message;
-      if (taskError) {
-        noDecision(asText(taskError), json.result, json.explorerUrl);
+      /*
+       * Any operator or task error is no decision, whatever shape it comes in
+       * (a string, an object, an array of either). The raw text goes to the
+       * console, not the screen: it is internal and can name infrastructure.
+       */
+      const opErrors = json.result?.operator_errors;
+      const hasOpErrors = Array.isArray(opErrors)
+        ? opErrors.length > 0
+        : opErrors != null && typeof opErrors === "object"
+          ? Object.keys(opErrors).length > 0
+          : Boolean(opErrors);
+      if (json.result?.error || hasOpErrors) {
+        console.warn("[check] task error", json.result?.error ?? opErrors);
+        noDecision(
+          "The operators could not complete this check, so the transfer stays blocked. The attestation link shows what they reported.",
+          json.result,
+          json.explorerUrl,
+        );
         return;
       }
 
@@ -446,7 +469,7 @@ export default function Wizard() {
       if (allow === undefined) {
         noDecision(
           "The operators answered, but no verdict could be read from the response. " +
-            "The transfer stays blocked. Open the attestation — that is the authoritative record.",
+            "The transfer stays blocked. Open the attestation, which is the authoritative record.",
           json.result,
           json.explorerUrl,
         );
@@ -454,6 +477,8 @@ export default function Wizard() {
       }
 
       const base: Outcome = {
+        runId,
+        screenedTo: sendTo,
         verdict: allow ? "pass" : "block",
         headline: allow ? "Compliant" : "Non Compliant",
         reason: allow
@@ -483,8 +508,14 @@ export default function Wizard() {
 
       if (early === "late") {
         setRun({ status: "done", outcome: base });
+        // Only ever lands on the run that asked for it. Without the id check,
+        // a slow answer from an earlier check could relabel a later one.
         screenP.then((sj) =>
-          setRun((r) => (r.status === "done" ? { ...r, outcome: withAttribution(r.outcome, sj, allow) } : r)),
+          setRun((r) =>
+            r.status === "done" && r.outcome.runId === runId
+              ? { ...r, outcome: withAttribution(r.outcome, sj, allow) }
+              : r,
+          ),
         );
       } else {
         setRun({ status: "done", outcome: withAttribution(base, early, allow) });
@@ -495,7 +526,10 @@ export default function Wizard() {
         setRun({ status: "idle" });
         return;
       }
-      noDecision(asText(e), null);
+      // Network failure or a non-JSON reply (e.g. a host 504 page). The raw
+      // parser message ("Unexpected token '<'…") means nothing to a visitor.
+      console.warn("[check] request failed", e);
+      noDecision("The check could not be completed, so the transfer stays blocked. Try again in a moment.", null);
     } finally {
       abortRef.current = null;
     }
@@ -539,8 +573,9 @@ export default function Wizard() {
             {health.ageHours === null ? "Data age unknown" : `Data ${Math.round(health.ageHours)}h old`}
           </span>
           <span>
-            Screening may not reflect recent designations. A verdict returned now can be confidently
-            wrong.
+            {health.ageHours === null
+              ? "The sanctions list's age could not be read. Checks may come back as Screening unavailable."
+              : "RedStone's sanctions list is more than 8 days old, so the policy will refuse to screen until it updates."}
           </span>
         </div>
       )}
@@ -840,9 +875,9 @@ function Console(props: {
                 claim here must stay true of it: 463 lists via OpenSanctions,
                 weekly updates, refuses to screen past 8 days. */}
             <div style={{ ...T.value, fontFamily: SANS, color: BODY, marginTop: SP.x2, maxWidth: "46ch" }}>
-              Blocks the transfer if either party is on the RedStone Sanctions Oracle: 463 official
-              lists including OFAC, EU, UN and UK, updated weekly. Enforced by an operator quorum
-              before it executes.
+              Blocks the transfer if either party is on the RedStone Sanctions Oracle, which RedStone
+              builds from 463 official lists including OFAC, EU, UN and UK and updates weekly.
+              Enforced by an operator quorum before it executes.
             </div>
 
             <div style={{ marginTop: "auto", paddingTop: SP.x3, ...label(), color: applied ? INK : FLAG }}>
@@ -867,10 +902,9 @@ function Console(props: {
 
           {/*
             One field, because there is one question: is this address on a
-            list. The deployed policy screens the recipient and nothing else —
-            the payer rules were removed once this page stopped asking for a
-            sender, rather than left in to be satisfied by an address the
-            visitor never chose.
+            list. The policy screens both parties, but the sender is a fresh
+            random address the visitor never sees, so only the recipient can
+            cause a denial.
           */}
           <Field
             name="Recipient"
@@ -1025,7 +1059,7 @@ function Pickers({
     {
       value: "clean",
       text: "Clean address",
-      hint: `A randomly generated address, which is on no list`,
+      hint: `A freshly generated random address with no history`,
     },
     {
       value: "ofac",
@@ -1265,14 +1299,14 @@ function Screening({ to, onCancel }: { to: string; onCancel: () => void }) {
           the panel is replaced by it. Honest because the order is true and the
           only claim made is "in progress", never "confirmed".
         */}
-        <Step n={1} done={phase >= 1}>
-          Task submitted to the Newton gateway
+        <Step n={1} done>
+          Task sent to the Newton gateway
         </Step>
-        <Step n={2} done={phase >= 2}>
-          Screened against the sanctions list bound to the policy on chain
+        <Step n={2} active={phase >= 2}>
+          Operators check RedStone&apos;s sanctions list on Ethereum mainnet
         </Step>
-        <Step n={3} done={phase >= 3}>
-          Operator quorum evaluates the policy and signs the result
+        <Step n={3} active={phase >= 3}>
+          The operator quorum signs the result
         </Step>
       </div>
 
@@ -1291,13 +1325,29 @@ function Screening({ to, onCancel }: { to: string; onCancel: () => void }) {
   );
 }
 
-function Step({ n, children, done }: { n: number; children: React.ReactNode; done?: boolean }) {
+/**
+ * A progress step. `done` shows ✓ and is only used for what we know happened
+ * (the task was sent). `active` highlights a step on the estimated cadence
+ * without claiming it finished: the gateway reports once, at the end.
+ */
+function Step({
+  n,
+  children,
+  done,
+  active,
+}: {
+  n: number;
+  children: React.ReactNode;
+  done?: boolean;
+  active?: boolean;
+}) {
+  const lit = done || active;
   return (
     <div style={{ display: "flex", gap: SP.x2, alignItems: "baseline" }}>
-      <span style={{ fontFamily: MONO, ...T.monoSm, color: done ? INK : MUTED_2, width: 16 }}>
+      <span style={{ fontFamily: MONO, ...T.monoSm, color: lit ? INK : MUTED_2, width: 16 }}>
         {done ? "✓" : `0${n}`}
       </span>
-      <span style={{ ...T.value, fontFamily: SANS, color: done ? INK : BODY }}>{children}</span>
+      <span style={{ ...T.value, fontFamily: SANS, color: lit ? INK : BODY }}>{children}</span>
     </div>
   );
 }
@@ -1421,7 +1471,13 @@ function ListedOn({
       style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: SP.x1, marginTop: SP.x3, minHeight: 32 }}
     >
       <span key={ready ? "l" : state} className="pe-fade" style={{ ...small(), color: "rgba(27,27,27,0.6)" }}>
-        {ready ? "Listed on" : state === "pending" ? "Checking which list…" : "List names unavailable"}
+        {ready
+          ? "Listed on"
+          : state === "pending"
+            ? "Checking which list…"
+            : state === "done"
+              ? "Not found on the list in a fresh lookup"
+              : "List names unavailable"}
       </span>
 
       {state === "pending" &&
@@ -1445,7 +1501,7 @@ function ListedOn({
           className="pe-chip"
           style={{ ...small(), color: "rgba(27,27,27,0.5)", animationDelay: `${base + names.length * 0.12}s` }}
         >
-          · list names via OpenSanctions
+          · list names via OpenSanctions, an unsigned lookup
         </span>
       )}
     </div>
@@ -1592,17 +1648,17 @@ function Decision({
       */}
       {outcome.verdict === "unavailable" && (
         <div style={{ ...small(), marginTop: SP.x2, maxWidth: "54ch", opacity: 0.8 }}>
-          This is the policy behaving correctly. A screening service that cannot answer is treated
-          the same as one that is down — the transfer is refused rather than allowed on stale
+          This is the policy behaving correctly. A sanctions list too old to trust is treated the same
+          as one that cannot be read, so the transfer is refused rather than allowed on stale
           information.
         </div>
       )}
 
       {outcome.verdict === "block" && p?.to && flagged.length === 0 && (
         <div style={{ ...small(), marginTop: SP.x2, maxWidth: "52ch", opacity: 0.75 }}>
-          The operators denied this transfer, but a lookup against the same list just now finds this
-          recipient undesignated. The signed verdict stands — the difference is worth investigating
-          in the operator response.
+          The operators denied this transfer, but a fresh lookup on the same list does not find this
+          recipient. The most likely cause is that the oracle could not screen it, which the policy
+          treats as a denial. The signed verdict stands; the attestation shows what the operators saw.
         </div>
       )}
 
@@ -1702,26 +1758,24 @@ function Decision({
         {/* No Designated/Clear tag when nothing was screened — an unscreened
             address is not a clear one. */}
         {/*
-          The tag is derived from the verdict so it lands WITH the panel, not
-          after it. Attribution (p.to) arrives from a second lookup a beat
-          later and carries the datasets; until it does, the recipient's status
-          is already settled by the signed verdict — block means designated,
-          pass means clear — so there is no reason to withhold the tag and let
-          it pop in behind the Copy button. When p.to arrives it takes over
-          (same sanctioned value, now with datasets).
+          "Designated" only ever comes from the lookup that found the address
+          on the list (p.to), never from the verdict alone. A denial can also
+          mean the oracle could not screen, and calling a recipient designated
+          on that basis is the accusation this page must never make (audit,
+          Oct 2026). A pass is safe to read straight off the signed verdict:
+          the policy only allows when the recipient was screened and not listed.
+
+          The address shown is the one that was screened, not whatever has
+          since been typed into the box.
         */}
         <PartyBlock
           name="Recipient"
-          address={to}
+          address={outcome.screenedTo ?? to}
           party={
-            outcome.verdict === "unavailable"
-              ? undefined
-              : (p?.to ?? {
-                  address: to,
-                  screened: true,
-                  sanctioned: outcome.verdict === "block",
-                  datasets: [],
-                })
+            p?.to ??
+            (outcome.verdict === "pass"
+              ? { address: outcome.screenedTo ?? to, screened: true, sanctioned: false, datasets: [] }
+              : undefined)
           }
         />
 

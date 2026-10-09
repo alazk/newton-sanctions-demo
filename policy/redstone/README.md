@@ -1,8 +1,28 @@
-# redstone
+# redstone: RedStone sanctions policy
 
 ## Overview
 
-<!-- Describe what this policy enforces -->
+Denies a transfer when the payee or payer is on the RedStone Sanctions Oracle
+(Ethereum mainnet `0x574Ad490fE8087B580DB227a8Ca7EfB7C19Dc8C4`), when the oracle
+could not screen, or when RedStone's list is older than
+`max_list_age_seconds` (default 8 days; only values between 1 hour and 30 days
+are honoured).
+
+- `policy.js` (WASM oracle) reads `areSanctioned([to, from])` and
+  `getLastUpdateBlockTimestamp()` at one pinned block. **v2:** fixed RPC list
+  (not taken from wasm_args), two independent RPCs must answer and agree on the
+  chain head within 64 blocks, listed if either says so, age is the older view.
+- `policy.rego` binds the screened payee to `input.to` and, if the intent has a
+  sender, the screened payer to `input.from`. Native transfers only: for a
+  token transfer `input.to` is the token contract.
+- wasm_args: `{ "to": "0x…", "from": "0x…" }`, hex-encoded UTF-8 JSON.
+
+Deployed: **v1** is policy `0xd0Ff7aca199AeaCC5F316b029A476Da7684a3877`
+(`dist/policy_cids.json` until v2 is deployed). v2 deploy steps: `../../AUDIT.md`.
+
+Fixtures in `configs/`: `wasm_args.json` / `intent.json` (clean),
+`*.sanctioned.json` (listed payee), `params.stale.json` (60 s limit, forces
+`screening_unavailable`).
 
 ## Prerequisites
 

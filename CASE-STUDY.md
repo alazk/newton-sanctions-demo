@@ -1,5 +1,10 @@
 # Enforcing Sanctions Controls in a DeFi Rewards Program
 
+> **Note (Oct 2026).** This case study describes the earlier setup, where the
+> sanctions list was a frozen snapshot held in the policy's on-chain params.
+> The live demo now reads the RedStone Sanctions Oracle on Ethereum mainnet.
+> Update the data-source sections before publishing.
+
 _A case study in screening reward recipients against a sanctions list and
 verifiably enforcing the result before the claim executes._
 

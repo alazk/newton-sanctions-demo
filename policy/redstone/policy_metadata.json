@@ -1,6 +1,6 @@
 {
   "name": "RedStone Sanctions Screening",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "author": "Newton Sanctions Demo",
   "link": "https://docs.redstone.finance/docs/stage1-market-data/sanctions-oracle/",
   "description": "Denies a transfer when the payee or payer is on the RedStone Sanctions Oracle (Ethereum mainnet, 463 official lists via OpenSanctions), or when that list is older than the configured limit."

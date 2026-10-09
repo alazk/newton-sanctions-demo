@@ -1,278 +1,86 @@
 import { NextRequest, NextResponse } from "next/server";
-import { CHAIN_ID, DEMO_POLICY_CLIENT, ENTRYPOINT } from "@/lib/catalog";
+import { CHAIN_ID } from "@/lib/catalog";
 import { clientKey, rateLimit } from "@/lib/rate-limit";
 import { wasmArgsFor } from "@/lib/policy-set";
 
 /**
- * Evaluates the generated policy against a live oracle on Ethereum Sepolia.
+ * Submit one real, quorum-signed Newton task for the page's "Check this
+ * transfer" button. Nothing else.
  *
- * This calls `newt_simulatePolicy` on the Newton gateway directly rather than
- * going through the SDK. The SDK's `simulatePolicy` builds a body that the
- * gateway rejected with `missing field 'chain_id'` — it only puts chain_id
- * inside `intent`, and this gateway build wants it at the top of `params` too.
- * Calling the RPC ourselves sidesteps that version skew and, more usefully,
- * lets us log the exact bytes on the wire when something fails.
+ * Audit (Oct 2026) narrowed this route on purpose:
  *
- * `newt_simulatePolicy` is what makes a builder possible: it accepts RAW REGO
- * plus a deployed PolicyData address, so whatever the wizard composes is
- * evaluated for real without deploying a contract first.
+ *  - Submit only. The old `newt_simulatePolicy` branch let any visitor run
+ *    their own Rego and oracle on our API key; the page never used it.
+ *  - One client. Tasks go to POLICY_CLIENT_REDSTONE and nowhere else. No
+ *    provider routing from the request and no fallback to another env var, so
+ *    a visitor cannot steer a task at a different client, and a missing
+ *    variable fails loudly instead of quietly screening against the wrong
+ *    policy.
+ *  - Validated input. `to` and `from` must be 20-byte addresses, `value` a
+ *    hex quantity, and the body is small. A typo never becomes a paid task.
+ *  - Fixed error text. Details go to the server log; the visitor sees a plain
+ *    sentence that names no env vars, URLs or raw gateway output.
  *
- * Ownership note: the gateway only checks that you own the policy_client when
- * one of the PolicyData contracts declares a secretsSchemaCid. The
- * Newton-hosted sanctions oracle declares none, so a borrowed policy_client
- * works. Providers that need an API key will fail this check.
+ * wasm_args (protocol 0.7) carry exactly { to, from } for the RedStone
+ * oracle, one entry per policy in the client's set ("0x" for pure-Rego
+ * policies; see lib/policy-set.ts). The server builds them; the visitor only
+ * supplies the two address values.
  */
 
 export const runtime = "nodejs";
 
 const GATEWAY = process.env.NEWTON_GATEWAY_URL ?? "https://gateway.testnet.newton.xyz/rpc";
+const MAX_BODY_BYTES = 2_048;
 
-export async function POST(req: NextRequest) {
-  /**
-   * Throttle before anything else, including reading the body: the point is
-   * to spend as little as possible on a request we are going to refuse.
-   */
-  const limited = rateLimit(clientKey(req));
-  if (!limited.ok) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: `Too many checks. Try again in ${limited.retryAfter}s.`,
-        hint: "Each check submits a real task to Sepolia, so the demo limits how fast they can be run.",
-      },
-      { status: 429, headers: { "retry-after": String(limited.retryAfter) } },
-    );
-  }
+/** Used when a caller (a script, curl) sends no sender. Excluded from usage counts. */
+const DEFAULT_SENDER = "0x8b4bA8708239757e84aD26a503500Bc5fC1c1a48";
 
-  const apiKey = process.env.NEWTON_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json({ ok: false, error: missingKeyMessage() }, { status: 500 });
-  }
+const isAddress = (a: unknown): a is string => typeof a === "string" && /^0x[0-9a-fA-F]{40}$/.test(a);
+const isQuantity = (v: unknown): v is string => typeof v === "string" && /^0x[0-9a-fA-F]{1,64}$/.test(v);
 
-  let body: {
-    rego?: string;
-    params?: Record<string, unknown>;
-    policyDataAddress?: string;
-    from?: string;
-    to?: string;
-    value?: string;
-    /** "submit" for a real quorum-signed task; anything else simulates. */
-    mode?: string;
-    /** Selects which provider's PolicyClient a submitted task goes to. */
-    providerId?: string;
-  };
-
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ ok: false, error: "Invalid JSON body" }, { status: 400 });
-  }
-
-  const { rego, params, policyDataAddress, from, to, value, mode, providerId } = body;
-  if (!to) {
-    return NextResponse.json({ ok: false, error: "to is required" }, { status: 400 });
-  }
-
-  /**
-   * Two very different things share this route.
-   *
-   *   simulate — newt_simulatePolicy. Sends the wizard's Rego inline, one
-   *              operator evaluates it, a boolean comes back. Milliseconds.
-   *              Nothing on-chain, nothing in the explorer.
-   *
-   *   submit   — newt_createTask. Creates a real task against the policy
-   *              BOUND TO THE CLIENT on-chain, signed by an operator quorum,
-   *              and it shows up in the explorer. Seconds.
-   *
-   * Note what this means: in submit mode the Rego in the wizard is ignored.
-   * Operators evaluate the deployed policyCid, not whatever you just edited.
-   */
-  if (mode === "submit") {
-    return submitRealTask({ from, to, value, policyDataAddress, providerId });
-  }
-
-  if (!rego) {
-    return NextResponse.json({ ok: false, error: "rego is required to simulate" }, { status: 400 });
-  }
-
-  // An empty policyDataAddress means the policy reads only data.params — no
-  // oracle to call, so send no policy_data at all. This is the path that works
-  // without deploying anything.
-  const usesOracle = Boolean(policyDataAddress);
-
-  const chainIdHex = toQuantity(CHAIN_ID);
-
-  // The policy no longer screens the payer, but the intent still needs one —
-  // every transaction has a sender, and the oracle refuses a request without
-  // it. Kept identical in the intent and the oracle args so the two describe
-  // the same transfer.
-  const sender = from || DEMO_POLICY_CLIENT;
-
-  const rpcParams = {
-    // Top level — the field the SDK omits. Note this one is a plain u64,
-    // while the one inside `intent` is a hex Quantity. Same name, different
-    // encoding, and the gateway is strict about both.
-    chain_id: CHAIN_ID,
-    policy_client: DEMO_POLICY_CLIENT,
-    policy: rego,
-    entrypoint: ENTRYPOINT,
-    intent: {
-      from: sender,
-      to,
-      value: value || "0x0",
-      data: "0x",
-      chain_id: chainIdHex,
-      function_signature: "0x",
-    },
-    policy_data: usesOracle
-      ? [
-          {
-            policy_data_address: policyDataAddress,
-            // Hex-encoded UTF-8 JSON, per the gateway's wasm_args convention.
-            wasm_args: hexEncodeJson({ to, from: sender, ...oracleArgs() }),
-          },
-        ]
-      : [],
-    policy_params: params ?? {},
-  };
-
-  const rpcBody = {
-    jsonrpc: "2.0",
-    // This gateway deviates from JSON-RPC 2.0: `id` must be a UUID string,
-    // not an integer. An integer comes back as a 422 with a non-JSON body.
-    id: crypto.randomUUID(),
-    method: "newt_simulatePolicy",
-    params: rpcParams,
-  };
-
-  try {
-    // Without a timeout a stalled gateway hangs the request forever and the
-    // page just sits on "Evaluating…".
-    const res = await fetch(GATEWAY, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(rpcBody),
-      signal: AbortSignal.timeout(45_000),
-    });
-
-    const text = await res.text();
-    let json: any;
-    try {
-      json = JSON.parse(text);
-    } catch {
-      console.error("[evaluate] non-JSON response:", res.status, text.slice(0, 500));
-      return NextResponse.json(
-        {
-          ok: false,
-          error: `Gateway returned ${res.status} with a non-JSON body`,
-          raw: text.slice(0, 2000),
-        },
-        { status: 502 },
-      );
-    }
-
-    if (json.error) {
-      const message = stringifyRpcError(json.error);
-      console.error("[evaluate] gateway error:", JSON.stringify(json.error, null, 2));
-      console.error("[evaluate] request was:", JSON.stringify(rpcBody, null, 2));
-      return NextResponse.json(
-        { ok: false, error: message, hint: hintFor(message), raw: json.error },
-        { status: 502 },
-      );
-    }
-
-    return NextResponse.json({ ok: true, result: json.result });
-  } catch (err) {
-    const isTimeout =
-      err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
-    const message = isTimeout
-      ? "The gateway did not respond within 45 seconds."
-      : err instanceof Error
-        ? err.message
-        : String(err);
-    console.error("[evaluate] request failed:", err);
-    return NextResponse.json(
-      {
-        ok: false,
-        error: message,
-        hint: isTimeout
-          ? "Retry. If it keeps timing out, the operator may be unavailable — which is exactly the case the 'fail closed' rule exists for."
-          : undefined,
-      },
-      { status: 504 },
-    );
-  }
+function fail(error: string, status: number, headers?: Record<string, string>) {
+  return NextResponse.json({ ok: false, error }, { status, headers });
 }
 
-/**
- * Create a real, quorum-signed task — the same thing deploy/12-cidv1.mjs does
- * from the terminal, and the only path that appears in the Newton Explorer.
- */
-async function submitRealTask({
-  from,
-  to,
-  value,
-  policyDataAddress,
-  providerId,
-}: {
-  from?: string;
-  to: string;
-  value?: string;
-  policyDataAddress?: string;
-  providerId?: string;
-}) {
+export async function POST(req: NextRequest) {
+  // Throttle before reading the body: spend as little as possible on a
+  // request we are going to refuse.
+  const limited = rateLimit(clientKey(req));
+  if (!limited.ok) {
+    return fail(`Too many checks. Try again in ${limited.retryAfter}s.`, 429, {
+      "retry-after": String(limited.retryAfter),
+    });
+  }
+
   const apiKey = process.env.NEWTON_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json({ ok: false, error: missingKeyMessage() }, { status: 500 });
+  const policyClient = process.env.POLICY_CLIENT_REDSTONE;
+  if (!apiKey || !isAddress(policyClient)) {
+    console.error("[evaluate] misconfigured:", { hasKey: Boolean(apiKey), client: policyClient ?? null });
+    return fail("Screening is not configured on this deployment.", 500);
   }
 
-  /**
-   * One PolicyClient binds one policy, so a provider is submittable only if it
-   * has a client of its own. Routing by provider here — rather than sending
-   * every submit to a single client — is what stops the UI attributing one
-   * provider's verdict to another. With yente bound to the shared client,
-   * submitting under the denylist previously returned "screening_unavailable":
-   * the yente policy's answer, labelled as the denylist's.
-   *
-   * Unset env means not submittable, and we say so rather than silently
-   * falling back to whichever client happens to be configured.
-   */
-  const CLIENT_BY_PROVIDER: Record<string, string | undefined> = {
-    yente: process.env.POLICY_CLIENT_YENTE ?? process.env.POLICY_CLIENT,
-    "local-denylist": process.env.POLICY_CLIENT_DENYLIST,
-    // The live client: since Oct 2026 its policy set is the RedStone policy.
-    redstone: process.env.POLICY_CLIENT_REDSTONE ?? process.env.POLICY_CLIENT_DENYLIST,
-  };
+  const raw = await req.text();
+  if (raw.length > MAX_BODY_BYTES) return fail("Request too large.", 413);
 
-  const policyClient = providerId ? CLIENT_BY_PROVIDER[providerId] : process.env.POLICY_CLIENT;
-
-  if (!policyClient) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          `No PolicyClient is configured for "${providerId}", so there is no on-chain policy to submit against.`,
-        hint:
-          "Use Test to evaluate this provider's rules, or deploy a PolicyClient for it and set " +
-          (providerId === "local-denylist" ? "POLICY_CLIENT_DENYLIST" : "POLICY_CLIENT_YENTE") +
-          " in .env.local.",
-      },
-      { status: 400 },
-    );
+  let body: { mode?: unknown; providerId?: unknown; to?: unknown; from?: unknown; value?: unknown };
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    return fail("Invalid JSON body.", 400);
   }
 
-  const sender = from || "0x8b4bA8708239757e84aD26a503500Bc5fC1c1a48";
+  if (body.mode !== undefined && body.mode !== "submit") return fail("Only submit is supported.", 400);
+  if (body.providerId !== undefined && body.providerId !== "redstone") return fail("Unknown provider.", 400);
+  if (!isAddress(body.to)) return fail("Recipient must be a 20-byte 0x address.", 400);
+  if (body.from !== undefined && !isAddress(body.from)) return fail("Sender must be a 20-byte 0x address.", 400);
+  if (body.value !== undefined && !isQuantity(body.value)) return fail("Value must be a hex quantity.", 400);
 
-  // One entry per policy in the client's set: oracle args for WASM policies,
-  // "0x" for pure-Rego ones. Read from chain (lib/policy-set.ts); if the read
-  // fails, fall back to a single args entry.
-  const oracleEntry = hexEncodeJson(
-    policyDataAddress ? { to, from: sender, ...oracleArgs() } : { to, from: sender },
-  );
-  const wasmArgs = (await wasmArgsFor(policyClient, oracleEntry)) ?? [oracleEntry];
+  const to = body.to;
+  const from = (body.from as string | undefined) ?? DEFAULT_SENDER;
+  const value = (body.value as string | undefined) ?? "0x0";
+
+  const entry = hexEncodeJson({ to, from });
+  const wasmArgs = (await wasmArgsFor(policyClient, entry)) ?? [entry];
 
   const rpcBody = {
     jsonrpc: "2.0",
@@ -281,34 +89,7 @@ async function submitRealTask({
     params: {
       chain_id: CHAIN_ID,
       policy_client: policyClient,
-      intent: {
-        from: sender,
-        to,
-        value: value || "0x0",
-        data: "0x",
-        chain_id: toQuantity(CHAIN_ID),
-        function_signature: "0x",
-      },
-      /**
-       * The deployed policy already knows WHICH oracle to call — that binding
-       * is on-chain. What it cannot know is what to ask it: the address being
-       * screened changes per task, so the args travel with the request.
-       *
-       * Note the shape differs from newt_simulatePolicy, which takes a
-       * `policy_data: [{ policy_data_address, wasm_args }]` array. createTask
-       * takes a single top-level `wasm_args` hex string and resolves the
-       * oracle from the client's on-chain binding. Sending simulate's shape
-       * here is not rejected — it is silently ignored, wasmArgs arrives as
-       * "0x", the oracle gets no address, returns HTTP 400, and the
-       * fail-closed rule denies. A clean wallet then reads NON COMPLIANT for
-       * a reason that has nothing to do with sanctions.
-       */
-      /*
-       * Protocol 0.7: clients hold a policy SET, and the gateway requires
-       * wasm_args to be an array with exactly one entry per policy in that
-       * set — "0x" (empty) for a pure-Rego policy like the denylist. Omitting
-       * it fails with "wasm_args count (0) must match the policy set (1)".
-       */
+      intent: { from, to, value, data: "0x", chain_id: toQuantity(CHAIN_ID), function_signature: "0x" },
       wasm_args: wasmArgs,
     },
   };
@@ -316,10 +97,7 @@ async function submitRealTask({
   try {
     const res = await fetch(GATEWAY, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify(rpcBody),
       signal: AbortSignal.timeout(60_000),
     });
@@ -329,48 +107,28 @@ async function submitRealTask({
     try {
       json = JSON.parse(text);
     } catch {
-      return NextResponse.json(
-        { ok: false, error: `Gateway returned ${res.status}: ${text.slice(0, 300)}` },
-        { status: 502 },
-      );
+      console.error("[evaluate] non-JSON gateway response:", res.status, text.slice(0, 500));
+      return fail("The Newton gateway returned an unexpected response.", 502);
     }
 
     if (json.error) {
-      const message = stringifyRpcError(json.error);
-      console.error("[submit] gateway error:", JSON.stringify(json.error, null, 2));
-      return NextResponse.json(
-        { ok: false, error: message, hint: hintFor(message), raw: json.error },
-        { status: 502 },
-      );
+      console.error("[evaluate] gateway error:", JSON.stringify(json.error).slice(0, 2000));
+      return fail("The Newton gateway could not run this check.", 502);
     }
 
-    const taskId =
-      json.result?.taskId ?? json.result?.task_id ?? json.result?.task?.taskId ?? null;
-
+    const taskId = json.result?.taskId ?? json.result?.task_id ?? json.result?.task?.taskId ?? null;
     return NextResponse.json({
       ok: true,
       mode: "submit",
       taskId,
       policyClient,
-      explorerUrl: taskId
-        ? `https://explorer.newton.xyz/testnet/task/${taskId}`
-        : null,
+      explorerUrl: typeof taskId === "string" ? `https://explorer.newton.xyz/testnet/task/${taskId}` : null,
       result: json.result,
     });
   } catch (err) {
-    const isTimeout =
-      err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
-    return NextResponse.json(
-      {
-        ok: false,
-        error: isTimeout
-          ? "The gateway did not respond within 60 seconds."
-          : err instanceof Error
-            ? err.message
-            : String(err),
-      },
-      { status: 504 },
-    );
+    const isTimeout = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
+    console.error("[evaluate] request failed:", err);
+    return fail(isTimeout ? "The Newton gateway did not answer within 60 seconds." : "Could not reach the Newton gateway.", 504);
   }
 }
 
@@ -379,81 +137,10 @@ function toQuantity(n: number): string {
   return "0x" + n.toString(16);
 }
 
-/**
- * Per-oracle wasmArgs beyond the address being screened.
- *
- * The yente oracle has no default endpoint on purpose — it refuses to run
- * without `yente_url` rather than silently screening against nothing. That
- * makes the URL a required input here. It's server-side env, not
- * NEXT_PUBLIC_*, because a tunnel URL pointing at a machine on someone's desk
- * doesn't belong in the browser bundle.
- *
- * Harmless for the other providers: their oracles ignore keys they don't read.
- */
-function oracleArgs(): Record<string, string> {
-  const url = process.env.YENTE_URL;
-  return url ? { yente_url: url, dataset: process.env.YENTE_DATASET ?? "sanctions" } : {};
-}
-
-/**
- * Tell the user where to fix it, in the environment they are actually in.
- *
- * The old text said "add it to .env.local and restart npm run dev", which is
- * useless advice to someone looking at the deployed site — .env.local is
- * gitignored and never reaches Vercel. Wrong-but-confident instructions cost
- * more time than a vague error.
- */
-function missingKeyMessage(): string {
-  const onVercel = Boolean(process.env.VERCEL);
-  return onVercel
-    ? "NEWTON_API_KEY is not set on this deployment. Add it in Vercel under " +
-        "Settings → Environment Variables, then redeploy — env changes do not apply " +
-        "to an existing deployment."
-    : "NEWTON_API_KEY is not set. Add it to .env.local — dashboard.newton.xyz → API Keys — " +
-        "then restart `npm run dev`.";
-}
-
-/** wasm_args is a hex-encoded UTF-8 JSON string. */
+/** wasm_args entries are hex-encoded UTF-8 JSON. */
 function hexEncodeJson(obj: unknown): string {
   const bytes = new TextEncoder().encode(JSON.stringify(obj));
   let out = "";
   for (const b of bytes) out += b.toString(16).padStart(2, "0");
   return "0x" + out;
-}
-
-/** JSON-RPC errors arrive in several shapes; never let one render as [object Object]. */
-function stringifyRpcError(e: unknown): string {
-  if (typeof e === "string") return e;
-  const o = e as Record<string, any>;
-  if (o?.message && typeof o.message === "string") {
-    return o.data ? `${o.message} — ${JSON.stringify(o.data)}` : o.message;
-  }
-  try {
-    return JSON.stringify(e, null, 2);
-  } catch {
-    return String(e);
-  }
-}
-
-function hintFor(message: string): string | undefined {
-  const m = message.toLowerCase();
-  if (m.includes("is owned by") || m.includes("owned by another user") || m.includes("authorizationfailed")) {
-    return "You need your own PolicyClient — the gateway requires the caller (derived from your API key) to be its on-chain owner, and it enforces this even for oracles that need no secrets. Deploy one at dashboard.newton.xyz: create a project on Ethereum Sepolia, then 'Deploy a sample one' at the PolicyClient step. Put the address in .env.local as NEXT_PUBLIC_POLICY_CLIENT and restart the dev server.";
-  }
-  if (m.includes("query on-chain owner") || m.includes("no owner") || m.includes("execution reverted")) {
-    return "The policy_client address isn't a live NewtonPolicyClient on Sepolia — getOwner() reverted. Deploy one from dashboard.newton.xyz and set NEXT_PUBLIC_POLICY_CLIENT in .env.local.";
-  }
-  if (m.includes("unauthor") || m.includes("401") || m.includes("api key")) {
-    return "The API key was rejected. Check NEWTON_API_KEY in .env.local, and restart the dev server after editing it.";
-  }
-  if (m.includes("secret")) {
-    return "This oracle needs provider credentials uploaded first. Switch to the Newton-hosted Chainalysis provider.";
-  }
-  if (m.includes("parse") || m.includes("rego") || m.includes("compile") || m.includes("entrypoint")) {
-    return "The generated Rego failed to compile. Copy it from step 3 and run `newton-cli regorus parse` to see where.";
-  }
-  if (m.includes("missing field")) {
-    return "The gateway rejected the request shape. The exact body sent is logged in the terminal running `npm run dev`.";
-  }
-  return undefined;
 }

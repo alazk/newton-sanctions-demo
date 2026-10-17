@@ -30,7 +30,6 @@ type Health = { ageHours: number | null } | null;
 
 const SANS = "var(--sans)";
 const MONO = "var(--mono)";
-const TINT = "#FBEDE3";
 const DIM = 0.32;
 
 const STEPS = [
@@ -95,20 +94,20 @@ export default function Intro({ health, onDone }: { health: Health; onDone: () =
   }, [step, go, onDone]);
 
   return (
-    <div className="pe-intro" style={{ padding: `${SP.x5}px ${INSET_X}` }}>
+    <div className="pe-intro" style={{ padding: `${SP.x3}px ${INSET_X}` }}>
       <figure className="pe-intro-figure" style={{ margin: 0 }}>
         <Art step={step} health={health} />
         <figcaption
           aria-live="polite"
           // One line, always: captions are kept short enough to fit.
-          style={{ fontFamily: SANS, ...T.valueSm, color: C.muted, textAlign: "center", marginTop: SP.x3, whiteSpace: "nowrap" }}
+          style={{ fontFamily: SANS, ...T.value, color: C.muted, textAlign: "center", marginTop: SP.x2 }}
         >
           {captionFor(step, health)}
         </figcaption>
       </figure>
 
       <div className="pe-intro-text">
-        <div role="tablist" aria-label="Intro steps" style={{ display: "flex", gap: SP.half, marginLeft: -8, marginBottom: SP.x2 }}>
+        <div role="tablist" aria-label="Intro steps" style={{ display: "flex", gap: SP.x1, marginBottom: SP.x3 }}>
           {STEPS.map((x, i) => (
             <button
               key={x.eyebrow}
@@ -122,31 +121,29 @@ export default function Intro({ health, onDone }: { health: Health; onDone: () =
             >
               <span
                 style={{
-                  width: i === step ? 20 : 8,
+                  width: 8,
                   height: 8,
                   borderRadius: R.pill,
-                  background: i === step ? C.ink : C.hairline,
-                  transition: "width 0.2s ease, background 0.2s ease",
+                  background: i === step ? C.accent : C.hairline,
+                  transition: "background 300ms cubic-bezier(0.22, 1, 0.36, 1)",
                 }}
               />
             </button>
           ))}
         </div>
 
-        <div style={{ minHeight: 236 }}>
+        <div style={{ minHeight: 168 }}>
           <div
             style={{
               fontFamily: SANS,
-              ...T.monoSm,
-              fontWeight: 500,
-              letterSpacing: "0.12em",
+              ...T.eyebrow,
               textTransform: "uppercase",
-              color: C.muted,
+              color: C.muted2,
             }}
           >
             {s.eyebrow}
           </div>
-          <h2 style={{ fontFamily: SANS, ...T.h3, color: C.ink, margin: `${SP.x1_5}px 0 ${SP.x2}px` }}>{s.title}</h2>
+          <h2 style={{ fontFamily: SANS, ...T.h3, color: C.ink, margin: `${SP.x2}px 0 ${SP.x2}px` }}>{s.title}</h2>
           <p style={{ fontFamily: SANS, ...T.valueLg, color: C.body, margin: 0, maxWidth: "44ch" }}>{s.body}</p>
         </div>
 
@@ -155,13 +152,10 @@ export default function Intro({ health, onDone }: { health: Health; onDone: () =
             Start with a policy
           </button>
           {!last && (
-            <button type="button" onClick={() => go(step + 1)} className="pe-reset" style={btn(false)}>
+            <button type="button" onClick={() => go(step + 1)} className="pe-reset pe-outline" style={btn(false)}>
               Next
             </button>
           )}
-        </div>
-        <div style={{ fontFamily: SANS, ...T.valueSm, color: C.muted2, marginTop: SP.x2 }} className="pe-intro-keys">
-          ← → to move · Esc to skip
         </div>
       </div>
     </div>
@@ -171,10 +165,10 @@ export default function Intro({ health, onDone }: { health: Health; onDone: () =
 function btn(fill: boolean): React.CSSProperties {
   return {
     height: H.control,
-    padding: `0 ${SP.x3}px`,
+    padding: `0 ${SP.page}px`,
     borderRadius: R.pill,
-    border: `${BORDER}px solid ${fill ? C.ink : C.hairline}`,
-    background: fill ? undefined : "transparent",
+    border: `${BORDER}px solid ${fill ? "transparent" : C.hairline}`,
+    background: fill ? undefined : C.surface,
     color: fill ? undefined : C.ink,
     fontFamily: SANS,
     ...T.label,
@@ -205,7 +199,7 @@ function Art({ step, health }: { step: number; health: Health }) {
     <div className="pe-intro-art" aria-hidden style={{ width: "100%", maxWidth: 400, margin: "0 auto" }}>
       {/* Governments */}
       <div style={{ ...fade(lit.sources), textAlign: "center" }}>
-        <div style={{ fontFamily: SANS, ...T.valueSm, fontSize: 12, lineHeight: "16px", color: C.muted, marginBottom: SP.x1 }}>
+        <div style={{ fontFamily: SANS, ...T.valueSm, color: C.muted, marginBottom: SP.x1 }}>
           Published by governments
         </div>
         <div style={{ display: "flex", justifyContent: "center", gap: SP.x1, flexWrap: "nowrap" }}>
@@ -214,8 +208,8 @@ function Art({ step, health }: { step: number; health: Health }) {
               key={t}
               style={{
                 fontFamily: SANS,
-                ...T.label,
-                fontSize: 13,
+                ...T.valueSm,
+                fontWeight: 500,
                 color: C.ink,
                 border: `${BORDER}px solid ${lit.sources && step === 0 ? C.ink : C.hairline}`,
                 borderRadius: R.pill,
@@ -245,7 +239,7 @@ function Art({ step, health }: { step: number; health: Health }) {
       >
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: SP.x1 }}>
           <span style={{ fontFamily: SANS, ...T.label, color: C.ink }}>RedStone Sanctions Oracle</span>
-          <span style={{ fontFamily: SANS, fontSize: 12, lineHeight: "16px", color: C.muted }}>Ethereum mainnet</span>
+          <span style={{ fontFamily: SANS, ...T.valueSm, color: C.muted }}>Ethereum mainnet</span>
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: SP.half, marginTop: SP.x1_5 }}>
@@ -261,11 +255,11 @@ function Art({ step, health }: { step: number; health: Health }) {
                   height: 32,
                   padding: `0 ${SP.x1_5}px`,
                   borderRadius: R.sm,
-                  background: hit ? TINT : C.field,
-                  border: `${BORDER}px solid ${hit ? C.flag : "transparent"}`,
+                  background: hit ? C.cautionWash : C.field,
+                  border: `${BORDER}px solid ${hit ? C.caution : "transparent"}`,
                   fontFamily: MONO,
                   ...T.monoSm,
-                  color: hit ? C.flag : C.muted,
+                  color: hit ? C.caution : C.muted,
                   transition: "background 0.3s ease, border-color 0.3s ease, color 0.3s ease",
                 }}
               >
@@ -278,7 +272,7 @@ function Art({ step, health }: { step: number; health: Health }) {
           })}
         </div>
 
-        <div style={{ fontFamily: SANS, fontSize: 12, lineHeight: "16px", color: C.muted, marginTop: SP.x1_5 }}>
+        <div style={{ fontFamily: SANS, ...T.valueSm, color: C.muted, marginTop: SP.x1_5 }}>
           463 lists via OpenSanctions · {age(health)}
         </div>
       </div>
@@ -294,9 +288,9 @@ function Art({ step, health }: { step: number; health: Health }) {
             borderRadius: "50%",
             display: "grid",
             placeItems: "center",
-            background: match ? C.flag : C.ink,
+            background: match ? C.caution : C.ink,
             color: C.surface,
-            boxShadow: `0 0 0 3px ${C.surface}, 0 0 0 5px ${match ? C.flag : C.ink}`,
+            boxShadow: `0 0 0 3px ${C.surface}, 0 0 0 5px ${match ? C.caution : C.ink}`,
             fontFamily: SANS,
             ...T.label,
             transition: "background 0.3s ease, box-shadow 0.3s ease",
@@ -308,9 +302,9 @@ function Art({ step, health }: { step: number; health: Health }) {
           style={{
             fontFamily: SANS,
             ...T.valueSm,
-            color: match ? C.flag : C.muted,
-            border: `${BORDER}px solid ${match ? C.flag : C.hairline}`,
-            background: match ? TINT : C.surface,
+            color: match ? C.caution : C.muted,
+            border: `${BORDER}px solid ${match ? C.caution : C.hairline}`,
+            background: match ? C.cautionWash : C.surface,
             borderRadius: R.pill,
             padding: `${SP.half}px ${SP.x2}px`,
             transition: "color 0.3s ease, border-color 0.3s ease, background 0.3s ease",
@@ -331,7 +325,7 @@ function Connector({ on, flag, dashed }: { on: boolean; flag?: boolean; dashed?:
         style={{
           width: 0,
           height: SP.x4,
-          borderLeft: `${BORDER * 2}px ${dashed ? "dashed" : "solid"} ${flag ? C.flag : on ? C.ink : C.hairline}`,
+          borderLeft: `${BORDER}px ${dashed ? "dashed" : "solid"} ${flag ? C.caution : on ? C.ink : C.hairline}`,
           transition: "border-color 0.3s ease",
         }}
       />

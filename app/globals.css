@@ -1,5 +1,14 @@
 @import "tailwindcss";
 
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/jetbrains-mono-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 /*
  * Newton Policy Engine.
  *
@@ -15,20 +24,24 @@
 :root {
   color-scheme: light;
 
-  --ink: #1b1b1b;
-  --ink-2: #333333;
-  --field: #f1f1f1;
+  --ink: #0e0e0f;
+  --ink-2: #6b6b6c;
+  --field: #f5f5f6;
   --surface: #ffffff;
-  --hairline: #e2e2e2;
-  --control: #bdbdbd;
-  --control-2: #cccccc;
-  --body: #4a4a4a;
-  --muted: #6b6b6b;
-  --muted-2: #a5a5a5;
+  --bone: #fbfcfe;
+  --hairline: #e3e3e4;
+  --border-strong: #6b6b6c;
+  --control: #9a9a9b;
+  --control-2: #9a9a9b;
+  --body: #6b6b6c;
+  --muted: #6b6b6c;
+  --muted-2: #737374;
+  --disabled: #9a9a9b;
 
-  --pass: #3f6f55;
-  --flag: #c2621a;
-  --error: #8e2b1f;
+  --pass: #0b6e4f;
+  --flag: #ad2b03;
+  --error: #8f2402;
+  --caution: #8a5e14;
 
   /*
    * Interaction is ink, not a hue.
@@ -39,14 +52,17 @@
    * already spoken for, a third accent is one voice too many. Ink does the
    * same work and stays out of the way.
    */
-  --accent: #1b1b1b;
-  --accent-hover: #333333;
-  --accent-tint: #ececec;
+  --accent: #0e0e0f;
+  --accent-hover: #393939;
+  --accent-tint: #f5f5f6;
+
+  --ease-newton: cubic-bezier(0.22, 1, 0.36, 1);
+  --duration: 300ms;
 
   --sans: var(--font-sans), -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
   --display: var(--sans);
   --prose: var(--sans);
-  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
 * {
@@ -60,13 +76,14 @@ body {
 }
 
 body {
-  background: var(--field);
+  background: var(--surface);
   color: var(--ink);
   font-family: var(--sans);
   -webkit-font-smoothing: antialiased;
-  /* The grotesque needs tighter tracking at display sizes than at 14px; set
-     per-element rather than globally. */
-  letter-spacing: -0.006em;
+  -moz-osx-font-smoothing: grayscale;
+  font-optical-sizing: auto;
+  font-feature-settings: "cv11";
+  letter-spacing: 0;
 }
 
 a {
@@ -93,6 +110,26 @@ a {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  width: 100%;
+  max-width: 1440px;
+  margin-inline: auto;
+  padding: 16px;
+  gap: 12px;
+  background: var(--surface);
+}
+
+@media (min-width: 640px) {
+  .pe-shell {
+    padding: 20px;
+    gap: 16px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .pe-shell {
+    padding: 24px;
+    gap: 24px;
+  }
 }
 
 @media (max-height: 700px) {
@@ -119,7 +156,7 @@ a {
  * final size.
  */
 /*
- * `round 24px` matches the stage radius (R.xl).
+ * `round 16px` matches the stage radius (R.xl).
  *
  * Without it the wash ends at inset(0 0 0 0) — a square-cornered clip. Safari
  * (and iOS especially) intersects that clip OVER the fill's border-radius, so
@@ -130,10 +167,10 @@ a {
  */
 @keyframes peWash {
   from {
-    clip-path: inset(0 100% 0 0 round 24px);
+    clip-path: inset(0 100% 0 0 round 16px);
   }
   to {
-    clip-path: inset(0 0 0 0 round 24px);
+    clip-path: inset(0 0 0 0 round 16px);
   }
 }
 
@@ -257,7 +294,7 @@ a {
   }
 }
 .pe-skeleton {
-  background: linear-gradient(90deg, rgba(27, 27, 27, 0.08) 25%, rgba(27, 27, 27, 0.16) 50%, rgba(27, 27, 27, 0.08) 75%);
+  background: linear-gradient(90deg, rgba(14, 14, 15, 0.06) 25%, rgba(14, 14, 15, 0.12) 50%, rgba(14, 14, 15, 0.06) 75%);
   background-size: 200% 100%;
   animation: peShimmer 1.4s linear infinite;
 }
@@ -319,20 +356,27 @@ a {
 
 /* The sheet draws focus as a ring on the control itself, not an offset
    outline, for fields specifically. */
-.pe-input:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-tint);
+.pe-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .pe-input {
   outline: none;
+  background: var(--surface);
+  font-variant-numeric: tabular-nums slashed-zero;
   transition:
-    border-color 0.14s ease,
-    box-shadow 0.14s ease;
+    border-color var(--duration) var(--ease-newton),
+    background-color var(--duration) var(--ease-newton);
 }
 
 .pe-input:hover:not(:focus) {
-  border-color: var(--muted-2, #a5a5a5);
+  border-color: var(--border-strong);
+  background: var(--field);
+}
+
+.pe-input::placeholder {
+  color: var(--muted-2);
 }
 
 .pe-hover:hover {
@@ -344,19 +388,51 @@ a {
 .pe-dark {
   background: var(--accent);
   color: #fff;
+  border-color: transparent;
+  transition: background-color var(--duration) var(--ease-newton);
 }
 
-.pe-dark:hover {
-  background: var(--accent-hover);
+@media (hover: hover) {
+  .pe-dark:hover:not(:disabled) {
+    background: var(--accent-hover);
+  }
 }
 
-.pe-dark:active {
-  background: var(--accent-hover);
-  transform: translateY(1px);
+.pe-dark:active:not(:disabled) {
+  background: color-mix(in srgb, var(--ink) 12%, var(--accent-hover));
+}
+
+.pe-dark:disabled,
+.pe-dark[disabled] {
+  background: var(--field);
+  color: var(--disabled);
+  opacity: 1;
+  cursor: not-allowed;
+}
+
+.pe-outline {
+  background: var(--surface);
+  color: var(--ink);
+  transition:
+    background-color var(--duration) var(--ease-newton),
+    border-color var(--duration) var(--ease-newton);
+}
+
+@media (hover: hover) {
+  .pe-outline:hover:not(:disabled) {
+    background: var(--field);
+    border-color: var(--border-strong);
+  }
+}
+
+.pe-outline:active:not(:disabled) {
+  background: color-mix(in srgb, var(--ink) 8%, var(--field));
 }
 
 .pe-disabled {
-  opacity: 0.36;
+  background: var(--field);
+  color: var(--disabled);
+  opacity: 1;
   pointer-events: none;
 }
 
@@ -366,14 +442,15 @@ a {
    the two are one row, not two floating panels. */
 .pe-console {
   display: grid;
-  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   align-items: stretch;
-  gap: 24px; /* SP.x3 */
+  gap: 32px;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1023px) {
   .pe-console {
     grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
   }
 }
 
@@ -386,20 +463,20 @@ a {
   min-height: 0;
   overflow: auto;
   width: 100%;
-  max-width: 1120px;
+  max-width: 1440px;
   margin: 0 auto;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   align-items: center;
   align-content: center;
-  gap: 64px; /* SP.x8 */
+  gap: 32px;
 }
 
 .pe-intro-text {
-  max-width: 520px;
+  max-width: none;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1023px) {
   .pe-intro {
     grid-template-columns: minmax(0, 1fr);
     align-content: start;
@@ -408,17 +485,8 @@ a {
   .pe-intro-text {
     max-width: none;
   }
-  /* Keyboard hint is noise on touch screens. */
-  .pe-intro-keys {
-    display: none;
-  }
 }
 
-@media (hover: none) {
-  .pe-intro-keys {
-    display: none;
-  }
-}
 
 @media (prefers-reduced-motion: reduce) {
   .pe-intro-art *,
@@ -488,7 +556,7 @@ a {
      each about 150px, which cuts "Sanctioned address" in half. */
   .pe-radios {
     grid-template-columns: minmax(0, 1fr) !important;
-    gap: 12px !important;
+    gap: 4px !important;
   }
 
   /* Verdict detail wraps to one column instead of two cramped ones. */

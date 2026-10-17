@@ -48,9 +48,7 @@ const CONTROL = C.control;
 const BODY = C.body;
 const MUTED = C.muted;
 const MUTED_2 = C.muted2;
-const ACCENT = C.accent;
 const PASS = C.pass;
-const FLAG = C.flag;
 const ERROR = C.error;
 
 const SANS = "var(--sans)";
@@ -60,8 +58,6 @@ const R_CARD = R.xl;
 const R_INSET = R.sm;
 const R_PILL = R.pill;
 
-const GAP = SP.x1_5;
-const PAGE_PAD = SP.x2;
 
 /**
  * Spacing, straight off the 8px grid.
@@ -228,12 +224,17 @@ type ScreeningHealth = {
 };
 
 const FILL: Record<Verdict, string> = {
-  pass: "linear-gradient(160deg, #D8FFCA, #A8DCB4)",
-  block: "linear-gradient(160deg, #FFE0BF, #EDB887)",
-  // Grey, deliberately. Not knowing is not a finding, and the palette should
-  // not lend it the weight of one.
-  unavailable: "linear-gradient(160deg, #ECECEC, #C9C9C9)",
-  none: "linear-gradient(160deg, #FFD6CD, #DFA79C)",
+  pass: "none",
+  block: "none",
+  unavailable: "none",
+  none: "none",
+};
+
+const TONE: Record<Verdict, string> = {
+  pass: C.passText,
+  block: C.flagText,
+  unavailable: C.muted,
+  none: C.caution,
 };
 
 /*
@@ -544,7 +545,7 @@ export default function Wizard() {
   return (
     <div
       className="pe-shell"
-      style={{ background: FIELD, padding: PAGE_PAD, gap: GAP }}
+      style={{ background: SURFACE }}
     >
       <Masthead health={health} onHome={reset} />
 
@@ -562,14 +563,14 @@ export default function Wizard() {
             alignItems: "center",
             gap: SP.x1,
             padding: `${SP.x1_5}px ${SP.x2}px`,
-            borderRadius: R_CARD,
-            border: `${BORDER}px solid ${FLAG}`,
-            background: "#FFF3E6",
-            color: "#7A3D0E",
+            borderRadius: R.md,
+            border: `${BORDER}px solid ${C.caution}`,
+            background: C.cautionWash,
+            color: INK,
             ...T.valueSm,
           }}
         >
-          <span style={{ ...label(), color: FLAG }}>
+          <span style={{ ...label(), color: C.caution }}>
             {health.ageHours === null ? "Data age unknown" : `Data ${Math.round(health.ageHours)}h old`}
           </span>
           <span>
@@ -597,9 +598,9 @@ export default function Wizard() {
           position: "relative",
           flex: 1,
           minHeight: 0,
-          borderRadius: R_CARD,
-          border: `${BORDER}px solid ${HAIRLINE}`,
-          background: SURFACE,
+          borderRadius: 0,
+          border: "none",
+          background: "transparent",
           overflow: "hidden",
           outline: "none",
           opacity: run.status === "done" && run.stale ? 0.45 : 1,
@@ -676,11 +677,11 @@ function Masthead({ health, onHome }: { health: ScreeningHealth | null; onHome: 
         // as Cancel and the verdict actions.
         padding: `${SP.x1_5}px ${INSET_X}`,
         background: SURFACE,
-        border: `${BORDER}px solid ${HAIRLINE}`,
+        border: `1px solid color-mix(in srgb, ${INK} 14%, transparent)`,
         borderRadius: R_CARD,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: SP.x2 }}>
         {/* The mark goes home, the way a masthead does everywhere else. */}
         <button
           type="button"
@@ -735,10 +736,10 @@ function Masthead({ health, onHome }: { health: ScreeningHealth | null; onHome: 
           // Height, not vertical padding. Padded, it came out at 38 — 2px
           // shorter than Cancel directly beneath it, and off the 8px grid.
           height: H.chip,
-          border: `${BORDER}px solid ${stale ? FLAG : HAIRLINE}`,
+          border: `${BORDER}px solid ${stale ? C.caution : HAIRLINE}`,
           borderRadius: R_PILL,
           padding: `0 ${SP.x2}px`,
-          background: FIELD,
+          background: SURFACE,
         }}
       >
         <span
@@ -747,13 +748,13 @@ function Masthead({ health, onHome }: { health: ScreeningHealth | null; onHome: 
             width: 7,
             height: 7,
             borderRadius: "50%",
-            background: health === null ? MUTED_2 : stale ? FLAG : PASS,
+            background: health === null ? MUTED_2 : stale ? C.caution : PASS,
             display: "block",
           }}
         />
         <span style={{ ...label(), color: INK }}>Sepolia</span>
         {stale && (
-          <span style={{ ...label(), color: FLAG }}>
+          <span style={{ ...label(), color: C.caution }}>
             · {health?.ageHours === null ? "Age unknown" : `${Math.round(health!.ageHours!)}h old`}
           </span>
         )}
@@ -799,7 +800,7 @@ function Console(props: {
         overflow: "auto",
         display: "flex",
         alignItems: "center",
-        padding: `${SP.x5}px ${INSET_X}`,
+        padding: `${SP.x3}px ${INSET_X}`,
       }}
     >
       {/*
@@ -811,7 +812,7 @@ function Console(props: {
         better address field — but the column now begins on the same line as
         everything else.
       */}
-      <div className="pe-console" style={{ width: "100%", maxWidth: 1180 }}>
+      <div className="pe-console" style={{ width: "100%" }}>
         {/* 01 */}
         <div style={{ display: "flex", flexDirection: "column", gap: S2 }}>
           {/* "Active policy", because it already is. A single compulsory
@@ -824,10 +825,11 @@ function Console(props: {
             onClick={onApply}
             className="pe-reset"
             style={{
-              background: FIELD,
-              border: `${BORDER}px solid ${applied ? INK : "transparent"}`,
-              borderRadius: R_INSET,
-              padding: 26,
+              background: SURFACE,
+              border: `1px solid color-mix(in srgb, ${INK} 14%, transparent)`,
+              boxShadow: applied ? `inset 2px 0 0 ${INK}` : "none",
+              borderRadius: R.lg,
+              padding: SP.x3,
               /*
                * Fills its column rather than setting the row's height.
                *
@@ -854,9 +856,9 @@ function Console(props: {
               <span
                 aria-hidden
                 style={{
-                  width: 22,
-                  height: 22,
-                  borderRadius: 6,
+                  width: 18,
+                  height: 18,
+                  borderRadius: R.sm,
                   border: `${BORDER}px solid ${applied ? INK : CONTROL}`,
                   background: applied ? INK : SURFACE,
                   color: "#fff",
@@ -880,7 +882,7 @@ function Console(props: {
               Enforced by an operator quorum before it executes.
             </div>
 
-            <div style={{ marginTop: "auto", paddingTop: SP.x3, ...label(), color: applied ? INK : FLAG }}>
+            <div style={{ marginTop: "auto", paddingTop: SP.x3, ...label(), color: applied ? INK : C.caution }}>
               {applied ? "Applied · tap to remove" : "Removed · nothing will be enforced"}
             </div>
           </button>
@@ -941,9 +943,9 @@ function Console(props: {
               justifyContent: "center",
               // Outlined rather than a grey slab. A filled grey block at this
               // size reads as a region, not as a control that is not ready.
-              background: ready ? undefined : "transparent",
-              border: `${BORDER}px solid ${ready ? "transparent" : CONTROL}`,
-              color: ready ? undefined : MUTED_2,
+              background: ready ? undefined : FIELD,
+              border: "none",
+              color: ready ? undefined : CONTROL,
               cursor: ready ? "pointer" : "not-allowed",
             }}
           >
@@ -1011,12 +1013,11 @@ function Field(props: {
           // read-only panel the same treatment.
           width: "100%",
           height: H.field,
-          borderRadius: R.sm,
+          borderRadius: R.md,
           border: `${BORDER}px solid ${invalid ? ERROR : CONTROL}`,
-          background: SURFACE,
           padding: `0 ${SP.x2}px`,
           fontFamily: MONO,
-          fontSize: T.value.fontSize,
+          fontSize: 16,
           color: INK,
         }}
       />
@@ -1090,7 +1091,14 @@ function Pickers({
         className="pe-radios"
         // Two equal halves spanning the field above, so the pair is symmetric
         // with the input and the action button rather than hugging the left.
-        style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: SP.x1_5 }}
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: SP.half,
+          padding: SP.half,
+          background: FIELD,
+          borderRadius: R.md,
+        }}
       >
         {opts.map((o) => (
           <Radio
@@ -1132,49 +1140,23 @@ function Radio({
       title={title}
       className="pe-reset"
       style={{
-        // A full-width option tile: same border and radius as the field above,
-        // so the two read as one block of controls.
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        gap: SP.x1_5,
         width: "100%",
-        height: H.control,
+        height: H.chip,
         padding: `0 ${SP.x2}px`,
-        borderRadius: R.sm,
-        border: `${BORDER}px solid ${checked ? INK : CONTROL}`,
-        background: SURFACE,
-        ...T.valueSm,
+        borderRadius: R.md,
+        border: "none",
+        background: checked ? SURFACE : "transparent",
+        boxShadow: checked ? "0 1px 2px color-mix(in srgb, #0E0E0F 14%, transparent)" : "none",
+        ...T.label,
         fontFamily: SANS,
-        color: INK,
+        color: checked ? INK : MUTED,
         cursor: "pointer",
-        transition: "border-color 0.14s ease",
+        transition: "background 300ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 300ms cubic-bezier(0.22, 1, 0.36, 1), color 300ms cubic-bezier(0.22, 1, 0.36, 1)",
       }}
     >
-      <span
-        aria-hidden
-        style={{
-          width: H.radio,
-          height: H.radio,
-          borderRadius: "50%",
-          border: `${checked ? 2 : BORDER}px solid ${checked ? ACCENT : CONTROL}`,
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          flexShrink: 0,
-          transition: "border-color 0.14s ease",
-        }}
-      >
-        <span
-          style={{
-            width: 10,
-            height: 10,
-            borderRadius: "50%",
-            background: checked ? ACCENT : "transparent",
-            transition: "background 0.14s ease",
-          }}
-        />
-      </span>
       {children}
     </button>
   );
@@ -1216,7 +1198,7 @@ function Screening({ to, onCancel }: { to: string; onCancel: () => void }) {
       style={{
         flex: 1,
         minHeight: 0,
-        padding: `${SP.x6}px ${INSET_X}`,
+        padding: `${SP.x3}px ${INSET_X}`,
         display: "flex",
         flexDirection: "column",
       }}
@@ -1262,10 +1244,8 @@ function Screening({ to, onCancel }: { to: string; onCancel: () => void }) {
       <div
         style={{
           fontFamily: SANS,
-          fontWeight: T.h2.fontWeight,
-          letterSpacing: T.h2.letterSpacing,
-          fontSize: "clamp(32px, 4.5vw, 48px)",
-          lineHeight: 1,
+          ...T.h1,
+          color: INK,
           marginTop: SP.x3,
         }}
       >
@@ -1315,7 +1295,7 @@ function Screening({ to, onCancel }: { to: string; onCancel: () => void }) {
           marginTop: "auto",
           height: 4,
           borderRadius: R_PILL,
-          background: "rgba(27,27,27,0.1)",
+          background: FIELD,
           overflow: "hidden",
         }}
       >
@@ -1343,11 +1323,38 @@ function Step({
 }) {
   const lit = done || active;
   return (
-    <div style={{ display: "flex", gap: SP.x2, alignItems: "baseline" }}>
-      <span style={{ fontFamily: MONO, ...T.monoSm, color: lit ? INK : MUTED_2, width: 16 }}>
-        {done ? "✓" : `0${n}`}
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: SP.x2,
+        minHeight: H.control,
+        padding: `${SP.x1}px ${SP.x2}px`,
+        borderRadius: R.md,
+        border: `1.5px solid ${done ? "color-mix(in srgb, " + PASS + " 30%, transparent)" : lit ? "color-mix(in srgb, " + INK + " 20%, transparent)" : HAIRLINE}`,
+        background: SURFACE,
+        color: lit ? INK : MUTED_2,
+      }}
+    >
+      <span
+        style={{
+          width: 18,
+          height: 18,
+          borderRadius: R.pill,
+          border: `1.5px solid ${done ? PASS : lit ? INK : HAIRLINE}`,
+          background: done ? PASS : SURFACE,
+          color: done ? "#fff" : MUTED_2,
+          display: "grid",
+          placeItems: "center",
+          fontFamily: SANS,
+          fontSize: 12,
+          fontWeight: 500,
+          flexShrink: 0,
+        }}
+      >
+        {done ? "✓" : n}
       </span>
-      <span style={{ ...T.value, fontFamily: SANS, color: lit ? INK : BODY }}>{children}</span>
+      <span style={{ ...T.label, fontFamily: SANS, color: "inherit" }}>{children}</span>
     </div>
   );
 }
@@ -1370,9 +1377,9 @@ function Tag({
 }) {
   const tones = {
     // "Designated" / "Listed on X" — the finding, so it carries weight.
-    strong: { background: "rgba(27,27,27,0.10)", color: INK },
+    strong: { background: C.flagWash, color: C.flagText },
     // "Clear" / "No match on X" — reassurance, so it recedes.
-    muted: { background: "rgba(27,27,27,0.05)", color: MUTED },
+    muted: { background: C.passWash, color: C.passText },
   } as const;
   return (
     <span
@@ -1409,9 +1416,9 @@ function Cta({
   const fill = variant === "fill";
   const base: React.CSSProperties = {
     height: size === "sm" ? H.chip : H.control,
-    padding: size === "sm" ? `0 ${SP.x2}px` : `0 ${SP.x3}px`,
+    padding: size === "sm" ? `0 ${SP.x2}px` : `0 ${SP.page}px`,
     borderRadius: R_PILL,
-    border: `${BORDER}px solid ${INK}`,
+    border: `${BORDER}px solid ${fill ? "transparent" : HAIRLINE}`,
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
@@ -1421,13 +1428,13 @@ function Cta({
     ...label(),
     // fill's colours come from .pe-dark, so its :hover works (inline styles
     // would out-specify the hover rule); outline sets its own flat colours.
-    ...(fill ? {} : { background: "transparent", color: INK }),
+    ...(fill ? {} : { color: INK }),
     ...style,
   };
   // pe-dark → primary fill + hover. pe-action-btn (the mobile full-width
   // stack rule) only belongs on the md action-rule buttons; a sm inline chip
   // like Copy must not stretch to 100% on a phone.
-  const cls = `pe-reset${size === "sm" ? "" : " pe-action-btn"}${fill ? " pe-dark" : ""}`;
+  const cls = `pe-reset${size === "sm" ? "" : " pe-action-btn"}${fill ? " pe-dark" : " pe-outline"}`;
   return href ? (
     <a href={href} target="_blank" rel="noreferrer" className={cls} style={base}>
       {children}
@@ -1470,7 +1477,7 @@ function ListedOn({
       aria-live="polite"
       style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: SP.x1, marginTop: SP.x3, minHeight: 32 }}
     >
-      <span key={ready ? "l" : state} className="pe-fade" style={{ ...small(), color: "rgba(27,27,27,0.6)" }}>
+      <span key={ready ? "l" : state} className="pe-fade" style={{ ...small(), color: MUTED }}>
         {ready
           ? "Listed on"
           : state === "pending"
@@ -1499,7 +1506,7 @@ function ListedOn({
       {ready && viaOpenSanctions && (
         <span
           className="pe-chip"
-          style={{ ...small(), color: "rgba(27,27,27,0.5)", animationDelay: `${base + names.length * 0.12}s` }}
+          style={{ ...small(), color: MUTED_2, animationDelay: `${base + names.length * 0.12}s` }}
         >
           · source: OpenSanctions
         </span>
@@ -1585,7 +1592,10 @@ function Decision({
           // Vertical still gives way on a short window; horizontal is the
           // shared inset, so the actions on the rule land on the same right
           // edge as the network badge in the masthead.
-          padding: `clamp(20px, 4vh, 56px) ${INSET_X}`,
+          width: "100%",
+          maxWidth: "36rem",
+          marginInline: "auto",
+          padding: `clamp(20px, 4vh, 48px) ${SP.x2}px`,
           display: "flex",
           flexDirection: "column",
           justifyContent: "center",
@@ -1604,12 +1614,8 @@ function Decision({
           className="pe-reveal"
           style={{
             fontFamily: SANS,
-            fontWeight: T.h1.fontWeight,
-            // Sized against height as well as width: the panel no longer
-            // scrolls, so on a short window the headline has to yield.
-            fontSize: "clamp(36px, min(7vw, 9vh), 76px)",
-            lineHeight: 1,
-            letterSpacing: T.h1.letterSpacing,
+            ...T.h1,
+            color: TONE[outcome.verdict],
           }}
         >
           {outcome.headline}
@@ -1618,7 +1624,7 @@ function Decision({
         {/* Reason, lists, parties — arriving in the order you would say them. */}
         <div className="pe-seq" style={{ display: "contents" }}>
         {/* Static text: it never changes after render, so it can't reflow. */}
-        <div style={{ ...T.valueLg, fontFamily: SANS, color: INK, marginTop: SP.x2, maxWidth: "46ch" }}>
+        <div style={{ ...T.valueLg, fontFamily: SANS, color: INK, marginTop: SP.x2, maxWidth: "44ch" }}>
           {outcome.reason}
         </div>
 
@@ -1694,7 +1700,7 @@ function Decision({
               style={{
                 fontFamily: MONO,
                 ...T.monoSm,
-                border: `${BORDER}px solid rgba(27,27,27,0.3)`,
+                border: `${BORDER}px solid ${HAIRLINE}`,
                 borderRadius: R_PILL,
                 padding: `${SP.half}px ${SP.x1_5}px`,
               }}
@@ -1736,7 +1742,7 @@ function Decision({
         {/* The divider that the buttons ride. Hidden on mobile, where the
             buttons stack full-width and a horizontal rule between them is
             noise. */}
-        <div className="pe-actions-line" style={{ flex: 1, height: 1, background: "rgba(27,27,27,0.16)" }} />
+        <div className="pe-actions-line" style={{ flex: 1, height: 1, background: HAIRLINE }} />
 
         <Cta variant="outline" onClick={onReset} style={{ flexShrink: 0 }}>
           New check
@@ -1789,7 +1795,7 @@ function Decision({
             the timestamp lines up with the address beside it. */}
         <div style={{ display: "flex", flexDirection: "column", gap: SP.half }}>
           <div style={{ display: "flex", alignItems: "center", minHeight: H.chip - 12 }}>
-            <span style={{ ...small(), color: "rgba(27,27,27,0.62)" }}>Decided</span>
+            <span style={{ ...small(), color: MUTED }}>Decided</span>
           </div>
           {/* Sans, not mono. A timestamp is not a hash, and setting it like
               one made it compete with the addresses beside it. */}
@@ -1824,7 +1830,7 @@ function PartyBlock({ name, address, party }: { name: string; address: string; p
           two read as a matched pair, and the long address gets the whole next
           row to itself instead of sharing it with a button. */}
       <div style={{ display: "flex", alignItems: "center", gap: 9, minHeight: H.chip - 12 }}>
-        <span style={{ ...small(), color: "rgba(27,27,27,0.62)" }}>{name}</span>
+        <span style={{ ...small(), color: MUTED }}>{name}</span>
         {party && (
           <Tag tone={party.sanctioned ? "strong" : "muted"}>
             {party.sanctioned ? "Designated" : "Clear"}

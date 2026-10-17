@@ -32,6 +32,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { Check } from "@phosphor-icons/react";
 import { GOALS, PROVIDERS, SANCTIONED_TEST_ADDRESS } from "@/lib/catalog";
 import { SANCTIONED_POOL } from "@/lib/sanctioned-pool";
 import { C, H, R, SP, T, BORDER, INSET_X } from "@/lib/ds";
@@ -611,7 +612,7 @@ export default function Wizard() {
       >
         {run.status === "idle" && intro && <Intro health={health} onDone={() => setIntro(false)} />}
 
-        {run.status === "idle" && !intro && (
+        {(run.status === "idle" || run.status === "running") && !intro && (
           <Console
             applied={applied}
             onApply={() => {
@@ -637,10 +638,6 @@ export default function Wizard() {
             toValid={toValid}
             throttled={throttled}
           />
-        )}
-
-        {run.status === "running" && (
-          <Screening to={to} onCancel={() => abortRef.current?.abort()} />
         )}
 
         {done && (
@@ -827,7 +824,6 @@ function Console(props: {
             style={{
               background: SURFACE,
               border: `1px solid color-mix(in srgb, ${INK} 14%, transparent)`,
-              boxShadow: applied ? `inset 2px 0 0 ${INK}` : "none",
               borderRadius: R.lg,
               padding: SP.x3,
               /*
@@ -862,14 +858,13 @@ function Console(props: {
                   border: `${BORDER}px solid ${applied ? INK : CONTROL}`,
                   background: applied ? INK : SURFACE,
                   color: "#fff",
-                  ...T.valueSm,
-                  lineHeight: "20px",
-                  textAlign: "center",
+                  display: "grid",
+                  placeItems: "center",
                   flexShrink: 0,
                   transition: "background 0.18s ease, border-color 0.18s ease",
                 }}
               >
-                {applied ? "✓" : ""}
+                {applied ? <Check size={12} weight="regular" /> : null}
               </span>
             </div>
 
@@ -882,7 +877,7 @@ function Console(props: {
               Enforced by an operator quorum before it executes.
             </div>
 
-            <div style={{ marginTop: "auto", paddingTop: SP.x3, ...label(), color: applied ? INK : C.caution }}>
+            <div style={{ marginTop: "auto", paddingTop: SP.x3, ...label(), color: applied ? INK : MUTED }}>
               {applied ? "Applied · tap to remove" : "Removed · nothing will be enforced"}
             </div>
           </button>
@@ -1159,203 +1154,6 @@ function Radio({
     >
       {children}
     </button>
-  );
-}
-
-/* ── Screening ──────────────────────────────────────────── */
-
-/**
- * Three steps, because there are three: the gateway takes the task, the oracle
- * performs ONE lookup against the consolidated collection, and a quorum signs.
- *
- * An earlier design ticked OFAC, EU, UN and UK off in sequence. That is four
- * animations for one query. The verdict can still report all four, because one
- * result covers all four — but showing them being *checked* one at a time
- * would be claiming work the backend never did.
- *
- * The bar is indeterminate on purpose: there is no percentage to read from a
- * quorum, and a moving number would be invented.
- */
-function Screening({ to, onCancel }: { to: string; onCancel: () => void }) {
-  /*
-   * Indicative phase progress. Step 1 is true immediately — we did submit the
-   * task. 2 and 3 advance on a short timer so the ordered phases are visible
-   * even though a denylist check returns in ~2s. The verdict replaces this
-   * panel the instant the real result lands, whatever phase we are on.
-   */
-  const [phase, setPhase] = useState(1);
-  useEffect(() => {
-    const t2 = setTimeout(() => setPhase(2), 650);
-    const t3 = setTimeout(() => setPhase(3), 1500);
-    return () => {
-      clearTimeout(t2);
-      clearTimeout(t3);
-    };
-  }, []);
-
-  return (
-    <div
-      style={{
-        flex: 1,
-        minHeight: 0,
-        padding: `${SP.x3}px ${INSET_X}`,
-        display: "flex",
-        flexDirection: "column",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <span
-          className="pe-spin"
-          style={{
-            width: 16,
-            height: 16,
-            borderRadius: "50%",
-            border: `2px solid ${CONTROL}`,
-            borderTopColor: INK,
-            display: "block",
-          }}
-        />
-        <span style={{ ...label(), color: INK }}>Verifying onchain</span>
-
-        {/* Eight seconds is long enough to notice a wrong address.
-
-            Same height and same right edge as the network badge one card
-            above it — they are the two things pinned to the top-right of the
-            page, one after the other, so any difference between them reads as
-            a mistake. */}
-        <button
-          type="button"
-          onClick={onCancel}
-          className="pe-reset"
-          style={{
-            marginLeft: "auto",
-            height: H.chip,
-            padding: `0 ${SP.x2}px`,
-            borderRadius: R_PILL,
-            border: `${BORDER}px solid ${CONTROL}`,
-            ...small(),
-            color: MUTED,
-          }}
-        >
-          Cancel
-        </button>
-      </div>
-
-      <div
-        style={{
-          fontFamily: SANS,
-          ...T.h1,
-          color: INK,
-          marginTop: SP.x3,
-        }}
-      >
-        Screening the recipient
-      </div>
-
-      <div className="pe-sweep" style={{ marginTop: SP.x3, borderRadius: R_INSET, maxWidth: 620 }}>
-        <div
-          style={{
-            background: FIELD,
-            padding: `${SP.x2}px ${SP.x2}px`,
-            display: "grid",
-            gridTemplateColumns: "max-content minmax(0, 1fr)",
-            columnGap: 18,
-            rowGap: 8,
-            alignItems: "baseline",
-          }}
-        >
-          <span style={{ ...small(), color: MUTED }}>Recipient</span>
-          <span style={{ fontFamily: MONO, ...T.mono, color: BODY }}>{middle(to)}</span>
-        </div>
-      </div>
-
-      <div style={{ marginTop: SP.x4, display: "flex", flexDirection: "column", gap: SP.x1_5 }}>
-        {/*
-          The three phases are real and strictly ordered — submit, screen,
-          quorum — but the gateway reports only once, at the end, so we cannot
-          confirm each individually. They advance on an estimated cadence
-          (see `phase` below) as an indication of progress, not a per-phase
-          receipt; whatever phase we are showing when the real verdict lands,
-          the panel is replaced by it. Honest because the order is true and the
-          only claim made is "in progress", never "confirmed".
-        */}
-        <Step n={1} done>
-          Task sent to the Newton gateway
-        </Step>
-        <Step n={2} active={phase >= 2}>
-          Operators check RedStone&apos;s sanctions list on Ethereum mainnet
-        </Step>
-        <Step n={3} active={phase >= 3}>
-          The operator quorum signs the result
-        </Step>
-      </div>
-
-      <div
-        style={{
-          marginTop: "auto",
-          height: 4,
-          borderRadius: R_PILL,
-          background: FIELD,
-          overflow: "hidden",
-        }}
-      >
-        <div className="pe-sweep" style={{ height: "100%", width: "100%" }} />
-      </div>
-    </div>
-  );
-}
-
-/**
- * A progress step. `done` shows ✓ and is only used for what we know happened
- * (the task was sent). `active` highlights a step on the estimated cadence
- * without claiming it finished: the gateway reports once, at the end.
- */
-function Step({
-  n,
-  children,
-  done,
-  active,
-}: {
-  n: number;
-  children: React.ReactNode;
-  done?: boolean;
-  active?: boolean;
-}) {
-  const lit = done || active;
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: SP.x2,
-        minHeight: H.control,
-        padding: `${SP.x1}px ${SP.x2}px`,
-        borderRadius: R.md,
-        border: `1.5px solid ${done ? "color-mix(in srgb, " + PASS + " 30%, transparent)" : lit ? "color-mix(in srgb, " + INK + " 20%, transparent)" : HAIRLINE}`,
-        background: SURFACE,
-        color: lit ? INK : MUTED_2,
-      }}
-    >
-      <span
-        style={{
-          width: 18,
-          height: 18,
-          borderRadius: R.pill,
-          border: `1.5px solid ${done ? PASS : lit ? INK : HAIRLINE}`,
-          background: done ? PASS : SURFACE,
-          color: done ? "#fff" : MUTED_2,
-          display: "grid",
-          placeItems: "center",
-          fontFamily: SANS,
-          fontSize: 12,
-          fontWeight: 500,
-          flexShrink: 0,
-        }}
-      >
-        {done ? "✓" : n}
-      </span>
-      <span style={{ ...T.label, fontFamily: SANS, color: "inherit" }}>{children}</span>
-    </div>
   );
 }
 

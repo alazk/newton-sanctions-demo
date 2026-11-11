@@ -61,4 +61,4 @@ const found = [];
 const taskId = json.result?.task_id ?? json.result?.taskId ?? json.result?.task?.task_id ?? "";
 const err = json.result?.error ?? json.result?.operator_errors?.[0]?.message;
 const verdict = err ? `NO DECISION: ${String(err).slice(0, 300)}` : found.length && found.every((b) => b === found[0]) ? (found[0] ? "ALLOWED" : "DENIED") : "UNREADABLE";
-console.log(`${to}  ${verdict}  (${secs}s)${taskId ? `  https://explorer.newton.xyz/testnet/task/${taskId}` : ""}`);
+console.log(`${to}  ${verdict}  (${secs}s)${taskId ? `  https://testnet.explorer.newton.xyz/tasks/${taskId}` : ""}`);

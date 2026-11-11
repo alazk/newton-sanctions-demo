@@ -30,6 +30,12 @@ import { wasmArgsFor } from "@/lib/policy-set";
 export const runtime = "nodejs";
 
 const GATEWAY = process.env.NEWTON_GATEWAY_URL ?? "https://gateway.testnet.newton.xyz/rpc";
+
+/**
+ * Task links. The explorer relaunched in Nov 2026: testnet has its own host
+ * and tasks moved from /testnet/task/<id> to /tasks/<id>; the old path 4xx's.
+ */
+const EXPLORER = process.env.NEWTON_EXPLORER_URL ?? "https://testnet.explorer.newton.xyz";
 const MAX_BODY_BYTES = 2_048;
 
 /** Used when a caller (a script, curl) sends no sender. Excluded from usage counts. */
@@ -122,7 +128,7 @@ export async function POST(req: NextRequest) {
       mode: "submit",
       taskId,
       policyClient,
-      explorerUrl: typeof taskId === "string" ? `https://explorer.newton.xyz/testnet/task/${taskId}` : null,
+      explorerUrl: typeof taskId === "string" ? `${EXPLORER}/tasks/${taskId}` : null,
       result: json.result,
     });
   } catch (err) {
